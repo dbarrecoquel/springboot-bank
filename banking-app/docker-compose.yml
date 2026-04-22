@@ -1,0 +1,233 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════════════
+#  banking-app — Infrastructure locale de développement
+# ═══════════════════════════════════════════════════════════════
+#
+#  Services :
+#    - postgres       : base de données principale (port 5432)
+#    - redis          : cache sessions + taux de change (port 6379)
+#    - zookeeper      : coordinateur Kafka
+#    - kafka          : messagerie événementielle (port 9092)
+#    - kafka-ui       : interface web Kafka (port 8090)
+#    - mailhog        : serveur SMTP de test (port 1025 / UI 8025)
+#    - banking-app    : image de l'application (port 8080)
+#
+#  Démarrage :
+#    docker compose up -d                  (infrastructure seule)
+#    docker compose --profile app up -d   (infra + application)
+#
+#  Arrêt + suppression des volumes :
+#    docker compose down -v
+# ═══════════════════════════════════════════════════════════════
+
+networks:
+  banking-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+
+services:
+
+  # ─────────────────────────────────────────
+  #  PostgreSQL 16
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: banking-postgres
+    restart: unless-stopped
+    networks:
+      - banking-net
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: bankingdb
+      POSTGRES_USER: bankuser
+      POSTGRES_PASSWORD: bankpassword
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=fr_FR.UTF-8"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./banking-infrastructure/src/main/resources/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bankuser -d bankingdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─────────────────────────────────────────
+  #  Redis 7
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: banking-redis
+    restart: unless-stopped
+    networks:
+      - banking-net
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --requirepass redispassword
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1
+      --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redispassword", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  #  Zookeeper (requis par Kafka)
+  # ─────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.1
+    container_name: banking-zookeeper
+    restart: unless-stopped
+    networks:
+      - banking-net
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep Mode"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  #  Apache Kafka 3.7
+  # ─────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: banking-kafka
+    restart: unless-stopped
+    networks:
+      - banking-net
+    ports:
+      - "9092:9092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+      # Topics pré-créés au démarrage
+      KAFKA_CREATE_TOPICS: >
+        banking.transactions:3:1,
+        banking.fraud-alerts:1:1,
+        banking.notifications:2:1,
+        banking.account-events:3:1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ─────────────────────────────────────────
+  #  Kafka UI (Provectus)
+  # ─────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: banking-kafka-ui
+    restart: unless-stopped
+    networks:
+      - banking-net
+    ports:
+      - "8090:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: banking-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+
+  # ─────────────────────────────────────────
+  #  MailHog — serveur SMTP de test
+  # ─────────────────────────────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: banking-mailhog
+    restart: unless-stopped
+    networks:
+      - banking-net
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Interface web
+
+  # ─────────────────────────────────────────
+  #  Application bancaire
+  #  Activée uniquement avec --profile app
+  # ─────────────────────────────────────────
+  banking-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        JAR_FILE: banking-api/target/banking-api-1.0.0-SNAPSHOT.jar
+    image: banking-app:latest
+    container_name: banking-app
+    profiles:
+      - app
+    restart: unless-stopped
+    networks:
+      - banking-net
+    ports:
+      - "8080:8080"
+      - "8081:8081"   # Actuator management port
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      # Base de données
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bankingdb
+      SPRING_DATASOURCE_USERNAME: bankuser
+      SPRING_DATASOURCE_PASSWORD: bankpassword
+      # Redis
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: redispassword
+      # Kafka
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # Mail
+      SPRING_MAIL_HOST: mailhog
+      SPRING_MAIL_PORT: 1025
+      # JWT (à remplacer par un secret vault en prod)
+      BANKING_JWT_SECRET: "dev-secret-key-min-256-bits-for-hs256-algorithm-change-in-prod"
+      BANKING_JWT_EXPIRATION: 3600000
+      # JVM
+      JAVA_TOOL_OPTIONS: >
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=75.0
+        -XX:+UseG1GC
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
