@@ -1,5 +1,7 @@
 package com.bank.domain.enums;
 
+import java.util.Set;
+
 public enum UserRole {
     /**
      * Client de la banque.
@@ -56,4 +58,51 @@ public enum UserRole {
         this.label = label;
     }
  
+    public String getLabel() {
+        return label;
+    }
+ 
+    /**
+     * Retourne le nom du rôle avec le préfixe {@code ROLE_}
+     * tel qu'attendu par Spring Security dans les configurations
+     * {@code HttpSecurity} et les expressions SpEL.
+     */
+    public String getAuthority() {
+        return "ROLE_" + this.name();
+    }
+ 
+    // ─────────────────────────────────────────────────────────
+    //  Helpers métier
+    // ─────────────────────────────────────────────────────────
+ 
+    /**
+     * Indique si ce rôle dispose de droits d'administration.
+     */
+    public boolean isAdministrative() {
+        return this == ADMIN || this == MANAGER;
+    }
+ 
+    /**
+     * Indique si ce rôle peut consulter les données de tous les clients
+     * (nécessite une justification métier, journalisée dans AuditLog).
+     */
+    public boolean canAccessAllCustomers() {
+        return this == TELLER || this == MANAGER
+            || this == COMPLIANCE || this == ADMIN;
+    }
+ 
+    /**
+     * Indique si ce rôle peut initier des opérations financières
+     * pour le compte d'un client.
+     */
+    public boolean canOperateOnBehalfOf() {
+        return this == TELLER || this == MANAGER || this == ADMIN;
+    }
+ 
+    /**
+     * Ensemble des rôles qui ont accès aux tableaux de bord de monitoring.
+     */
+    public static Set<UserRole> monitoringRoles() {
+        return Set.of(MANAGER, COMPLIANCE, ADMIN);
+    }
 }
