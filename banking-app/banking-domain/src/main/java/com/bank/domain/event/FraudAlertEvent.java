@@ -90,7 +90,7 @@ public record FraudAlertEvent(
     	 if (autoBlocked) return RecommendedAction.BLOCK_ACCOUNT_AND_CARD;
     	 
     	 return switch (severity) {
-    	 	case LOW      -> RecommendedAction.MONITOR;
+    	 	case  LOW      -> RecommendedAction.MONITOR;
 	         case MEDIUM   -> RecommendedAction.REQUEST_STRONG_AUTH;
 	         case HIGH     -> RecommendedAction.BLOCK_TRANSACTION;
 	         case CRITICAL -> RecommendedAction.BLOCK_ACCOUNT;
