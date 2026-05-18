@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <title>Confirmation de transaction</title>
+    <style>
+        /* Reset */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+               background-color: #f4f6f9; color: #1a1a2e; }
+
+        /* Conteneur principal */
+        .wrapper      { max-width: 600px; margin: 32px auto; padding: 0 16px; }
+        .card         { background: #ffffff; border-radius: 12px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,.08); overflow: hidden; }
+
+        /* En-tête */
+        .header       { background: linear-gradient(135deg, #1A3C8F 0%, #2563EB 100%);
+                        padding: 32px 40px; text-align: center; }
+        .header img   { height: 40px; margin-bottom: 12px; }
+        .header h1    { color: #ffffff; font-size: 20px; font-weight: 600;
+                        letter-spacing: -.3px; }
+
+        /* Badge montant */
+        .amount-badge { margin: 32px auto 0;
+                        background: rgba(255,255,255,.15);
+                        border: 1px solid rgba(255,255,255,.3);
+                        border-radius: 50px; display: inline-block;
+                        padding: 8px 24px; color: #ffffff;
+                        font-size: 26px; font-weight: 700; }
+
+        /* Corps */
+        .body         { padding: 32px 40px; }
+        .greeting     { font-size: 15px; color: #374151; margin-bottom: 24px; }
+
+        /* Tableau récapitulatif */
+        .summary      { width: 100%; border-collapse: collapse;
+                        border-radius: 8px; overflow: hidden;
+                        border: 1px solid #e5e7eb; margin-bottom: 28px; }
+        .summary tr:nth-child(even) td { background: #f9fafb; }
+        .summary td   { padding: 12px 16px; font-size: 14px; }
+        .summary td:first-child { color: #6b7280; width: 40%; font-weight: 500; }
+        .summary td:last-child  { color: #111827; font-weight: 600; }
+
+        /* Statut */
+        .status-pill  { display: inline-block; padding: 3px 10px; border-radius: 20px;
+                        font-size: 12px; font-weight: 600; text-transform: uppercase;
+                        letter-spacing: .4px; }
+        .status-pending  { background: #fef9c3; color: #854d0e; }
+        .status-approved { background: #dcfce7; color: #166534; }
+        .status-settled  { background: #dbeafe; color: #1e40af; }
+
+        /* Bannière avertissement */
+        .warning-box  { background: #fff7ed; border-left: 4px solid #f97316;
+                        border-radius: 4px; padding: 14px 16px;
+                        font-size: 13px; color: #9a3412; margin-bottom: 24px; }
+
+        /* Bouton CTA */
+        .cta-wrap     { text-align: center; margin: 28px 0; }
+        .cta-btn      { display: inline-block; background: #1A3C8F;
+                        color: #ffffff !important; text-decoration: none;
+                        padding: 13px 32px; border-radius: 8px;
+                        font-size: 15px; font-weight: 600; }
+        .cta-btn:hover { background: #1e40af; }
+
+        /* Séparateur */
+        .divider      { border: none; border-top: 1px solid #e5e7eb;
+                        margin: 24px 0; }
+
+        /* Pied de page */
+        .footer       { background: #f9fafb; padding: 24px 40px;
+                        text-align: center; }
+        .footer p     { font-size: 12px; color: #9ca3af; line-height: 1.6; }
+        .footer a     { color: #6b7280; text-decoration: underline; }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            .body, .footer { padding: 24px 20px; }
+            .header        { padding: 24px 20px; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+    <div class="card">
+
+        <!-- ── En-tête ─────────────────────────────────────── -->
+        <div class="header">
+            <h1>Votre transaction</h1>
+            <div class="amount-badge">
+                <span th:text="${amount}">0,00</span>&nbsp;<span th:text="${currency}">EUR</span>
+            </div>
+        </div>
+
+        <!-- ── Corps ──────────────────────────────────────── -->
+        <div class="body">
+
+            <p class="greeting">
+                Bonjour <strong th:text="${ownerFullName ?: 'client'}">Prénom Nom</strong>,
+            </p>
+            <p style="font-size:15px; color:#374151; margin-bottom:28px;">
+                Votre opération a bien été enregistrée. Voici le récapitulatif :
+            </p>
+
+            <!-- Tableau récapitulatif -->
+            <table class="summary">
+                <tr>
+                    <td>Référence</td>
+                    <td th:text="${reference}">TXN-20240127-A3F9B2</td>
+                </tr>
+                <tr>
+                    <td>Type</td>
+                    <td th:text="${typeLabel}">Virement SEPA</td>
+                </tr>
+                <tr>
+                    <td>Montant</td>
+                    <td>
+                        <strong th:text="${amount}">0,00</strong>&nbsp;<span th:text="${currency}">EUR</span>
+                    </td>
+                </tr>
+                <tr th:if="${fees != null and fees > 0}">
+                    <td>Frais</td>
+                    <td th:text="${fees + ' ' + currency}">0,00 EUR</td>
+                </tr>
+                <tr th:if="${counterpartName != null}">
+                    <td>Bénéficiaire</td>
+                    <td th:text="${counterpartName}">—</td>
+                </tr>
+                <tr th:if="${counterpartIban != null}">
+                    <td>IBAN destinataire</td>
+                    <td th:text="${counterpartIban}">—</td>
+                </tr>
+                <tr th:if="${label != null}">
+                    <td>Motif</td>
+                    <td th:text="${label}">—</td>
+                </tr>
+                <tr>
+                    <td>Statut</td>
+                    <td>
+                        <span class="status-pill status-pending"
+                              th:classappend="${status == 'SETTLED'} ? 'status-settled'
+                                           : (${status == 'APPROVED'} ? 'status-approved'
+                                           : 'status-pending')"
+                              th:text="${statusLabel ?: status}">En attente</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Date</td>
+                    <td th:text="${#temporals.format(createdAt, 'dd/MM/yyyy à HH:mm')}">—</td>
+                </tr>
+                <tr th:if="${accountIban != null}">
+                    <td>Compte débité</td>
+                    <td th:text="${accountIban}">FR76 ****</td>
+                </tr>
+            </table>
+
+            <!-- Avertissement si non-initiée -->
+            <div class="warning-box">
+                🔒&nbsp; Si vous n'êtes <strong>pas à l'origine</strong> de cette opération,
+                contactez immédiatement votre conseiller ou appelez le
+                <strong>09 XX XX XX XX</strong> (disponible 24h/24).
+            </div>
+
+            <!-- CTA -->
+            <div class="cta-wrap">
+                <a th:href="${appUrl + '/accounts/' + accountId + '/transactions/' + transactionId}"
+                   href="#"
+                   class="cta-btn">Voir le détail de la transaction</a>
+            </div>
+
+            <hr class="divider"/>
+
+            <p style="font-size:13px; color:#6b7280; text-align:center;">
+                Référence de suivi : <code th:text="${reference}">TXN-XXXXXXXX</code>
+            </p>
+        </div>
+
+        <!-- ── Pied de page ───────────────────────────────── -->
+        <div class="footer">
+            <p>
+                Cet email a été envoyé à <span th:text="${recipient}">client@example.com</span>
+                car vous avez un compte chez Votre Banque.<br/>
+                <a href="#">Se désabonner des notifications</a> &middot;
+                <a href="#">Politique de confidentialité</a> &middot;
+                <a href="#">Centre d'aide</a>
+            </p>
+            <p style="margin-top:10px;">
+                &copy; <span th:text="${#dates.year(#dates.createNow())}">2026</span>
+                Votre Banque — Tous droits réservés.<br/>
+                Établissement de crédit agréé par l'ACPR — N° ORIAS XXXXXXXX
+            </p>
+        </div>
+
+    </div>
+</div>
+</body>
+</html>

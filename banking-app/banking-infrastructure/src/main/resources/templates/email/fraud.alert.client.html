@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <title>Alerte sécurité</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+               background-color: #f4f6f9; color: #1a1a2e; }
+
+        .wrapper   { max-width: 600px; margin: 32px auto; padding: 0 16px; }
+        .card      { background: #ffffff; border-radius: 12px;
+                     box-shadow: 0 2px 8px rgba(0,0,0,.08); overflow: hidden; }
+
+        /* En-tête rouge — urgence */
+        .header    { background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+                     padding: 36px 40px; text-align: center; }
+        .header h1 { color: #ffffff; font-size: 22px; font-weight: 700;
+                     letter-spacing: -.3px; margin-top: 12px; }
+        .header p  { color: rgba(255,255,255,.85); font-size: 14px; margin-top: 6px; }
+
+        /* Icône alerte */
+        .alert-icon { width: 56px; height: 56px; background: rgba(255,255,255,.2);
+                      border-radius: 50%; display: inline-flex;
+                      align-items: center; justify-content: center;
+                      font-size: 28px; }
+
+        .body      { padding: 32px 40px; }
+        .greeting  { font-size: 15px; color: #374151; margin-bottom: 20px; }
+
+        /* Encadré alerte principale */
+        .alert-box { background: #fef2f2; border: 1px solid #fecaca;
+                     border-radius: 8px; padding: 20px 24px; margin-bottom: 28px; }
+        .alert-box h2 { font-size: 16px; color: #991b1b; margin-bottom: 8px;
+                        display: flex; align-items: center; gap: 8px; }
+        .alert-box p  { font-size: 14px; color: #7f1d1d; line-height: 1.6; }
+
+        /* Infos transaction (intentionnellement vagues côté client) */
+        .info-row  { display: flex; justify-content: space-between;
+                     align-items: center; padding: 10px 0;
+                     border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: #6b7280; font-weight: 500; }
+        .info-value { color: #111827; font-weight: 600; }
+
+        /* Étapes à suivre */
+        .steps     { margin: 28px 0; }
+        .steps h3  { font-size: 15px; font-weight: 700; color: #111827;
+                     margin-bottom: 16px; }
+        .step      { display: flex; gap: 14px; margin-bottom: 16px;
+                     align-items: flex-start; }
+        .step-num  { flex-shrink: 0; width: 28px; height: 28px;
+                     background: #1A3C8F; color: #fff; border-radius: 50%;
+                     display: flex; align-items: center; justify-content: center;
+                     font-size: 13px; font-weight: 700; }
+        .step-text { font-size: 14px; color: #374151; line-height: 1.5;
+                     padding-top: 3px; }
+
+        /* Boutons d'action */
+        .actions   { display: flex; gap: 12px; margin: 28px 0;
+                     flex-wrap: wrap; }
+        .btn-primary { flex: 1; min-width: 160px; display: inline-block;
+                       background: #b91c1c; color: #fff !important;
+                       text-decoration: none; padding: 13px 20px;
+                       border-radius: 8px; font-size: 14px; font-weight: 600;
+                       text-align: center; }
+        .btn-secondary { flex: 1; min-width: 160px; display: inline-block;
+                         background: #f9fafb; color: #374151 !important;
+                         text-decoration: none; padding: 13px 20px;
+                         border-radius: 8px; font-size: 14px; font-weight: 600;
+                         text-align: center; border: 1px solid #e5e7eb; }
+
+        /* Numéro d'urgence */
+        .hotline   { background: #fff7ed; border: 1px solid #fed7aa;
+                     border-radius: 8px; padding: 16px 20px;
+                     text-align: center; margin-bottom: 24px; }
+        .hotline p { font-size: 13px; color: #9a3412; }
+        .hotline .phone { font-size: 22px; font-weight: 700;
+                          color: #b45309; letter-spacing: 1px; }
+
+        .divider   { border: none; border-top: 1px solid #e5e7eb; margin: 24px 0; }
+
+        .footer    { background: #f9fafb; padding: 24px 40px; text-align: center; }
+        .footer p  { font-size: 12px; color: #9ca3af; line-height: 1.6; }
+        .footer a  { color: #6b7280; text-decoration: underline; }
+
+        @media (max-width: 480px) {
+            .body, .footer, .header { padding: 24px 20px; }
+            .actions { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+    <div class="card">
+
+        <!-- ── En-tête ─────────────────────────────────────── -->
+        <div class="header">
+            <div class="alert-icon">🔐</div>
+            <h1>Alerte de sécurité</h1>
+            <p>Une activité inhabituelle a été détectée sur votre compte</p>
+        </div>
+
+        <!-- ── Corps ──────────────────────────────────────── -->
+        <div class="body">
+
+            <p class="greeting">
+                Bonjour <strong th:text="${ownerFullName ?: 'client'}">Prénom Nom</strong>,
+            </p>
+
+            <!-- Encadré alerte -->
+            <div class="alert-box">
+                <h2>⚠️ Activité suspecte détectée</h2>
+                <p>
+                    Notre système de sécurité a identifié une opération potentiellement
+                    non autorisée sur votre compte. Cette opération a été
+                    <strong>bloquée à titre préventif</strong> pour protéger vos fonds.
+                </p>
+            </div>
+
+            <!-- Informations de l'opération (volontairement vagues — sécurité) -->
+            <div style="margin-bottom: 24px;">
+                <div class="info-row">
+                    <span class="info-label">Date de détection</span>
+                    <span class="info-value"
+                          th:text="${#temporals.format(detectedAt, 'dd/MM/yyyy à HH:mm')}">
+                        01/01/2024 à 14h32
+                    </span>
+                </div>
+                <div class="info-row" th:if="${maskedIban != null}">
+                    <span class="info-label">Compte concerné</span>
+                    <span class="info-value" th:text="${maskedIban}">FR76 **** **** 189</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Référence interne</span>
+                    <span class="info-value" th:text="${transactionReference}">TXN-XXXXXXXX</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Statut</span>
+                    <span class="info-value" style="color:#b91c1c;">⛔ Opération bloquée</span>
+                </div>
+            </div>
+
+            <!-- Étapes à suivre -->
+            <div class="steps">
+                <h3>Que faire maintenant ?</h3>
+
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <div class="step-text">
+                        <strong>Vérifiez</strong> si vous êtes à l'origine de cette opération.
+                        Si oui, aucune action n'est requise — contactez-nous pour débloquer.
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <div class="step-text">
+                        Si vous <strong>ne reconnaissez pas</strong> cette opération,
+                        signalez-la immédiatement via votre espace client ou
+                        appelez notre service sécurité.
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <div class="step-text">
+                        <strong>Changez votre mot de passe</strong> et vérifiez
+                        vos dernières connexions dans votre espace client.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Boutons d'action -->
+            <div class="actions">
+                <a th:href="${appUrl + '/security/fraud-report?ref=' + transactionReference}"
+                   href="#"
+                   class="btn-primary">
+                    ⛔ Signaler comme fraude
+                </a>
+                <a th:href="${appUrl + '/security/confirm?ref=' + transactionReference}"
+                   href="#"
+                   class="btn-secondary">
+                    ✅ C'était bien moi
+                </a>
+            </div>
+
+            <!-- Numéro d'urgence -->
+            <div class="hotline">
+                <p>Assistance sécurité disponible <strong>24h/24 — 7j/7</strong></p>
+                <div class="phone">09 XX XX XX XX</div>
+                <p style="margin-top: 6px; font-size: 12px;">
+                    (appel non surtaxé depuis la France métropolitaine)
+                </p>
+            </div>
+
+            <hr class="divider"/>
+
+            <p style="font-size: 13px; color: #6b7280; text-align: center;">
+                Pour votre sécurité, nous ne vous demanderons <strong>jamais</strong>
+                votre code PIN, mot de passe ou numéro de carte complet par email ou téléphone.
+            </p>
+        </div>
+
+        <!-- ── Pied de page ───────────────────────────────── -->
+        <div class="footer">
+            <p>
+                Cet email a été envoyé à <span th:text="${recipient}">client@example.com</span>
+                suite à une alerte de sécurité sur votre compte.<br/>
+                <a href="#">Politique de sécurité</a> &middot;
+                <a href="#">Centre d'aide</a> &middot;
+                <a href="#">Nous contacter</a>
+            </p>
+            <p style="margin-top:10px;">
+                &copy; <span th:text="${#dates.year(#dates.createNow())}">2026</span>
+                Votre Banque — Tous droits réservés.<br/>
+                Établissement de crédit agréé par l'ACPR — N° ORIAS XXXXXXXX
+            </p>
+        </div>
+
+    </div>
+</div>
+</body>
+</html>
