@@ -49,7 +49,7 @@ public interface UserRepository
 			WHERE LOWER(u.firstName) LIKE LOWER(CONCAT('%', :query , '%'))
 			OR LOWER(u.lastName) LIKE LOWER(CONCAT('%', :query , '%'))
 			OR LOWER(u.email) LIKE LOWER(CONCAT('%', :query , '%'))
-			ORDER BT u.lastName ASC, u.firstName ASC
+			ORDER BY u.lastName ASC, u.firstName ASC
 			""")
 	Page<User> searchByNameOrEmail(@Param("query") String query, Pageable pageable);
 	

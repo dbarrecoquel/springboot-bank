@@ -23,15 +23,15 @@ public interface CardRepository extends JpaRepository<Card, UUID> {
 	List<Card> findByOwnerIdOrderByCreatedAtDesc(UUID ownerId);
 	List<Card> findByAccountIdOrderByCreatedAtDesc(UUID accountId);
 	List<Card> findByOwnerIdAndStatus(UUID ownerId, CardStatus status);
-	
-	boolean existByIdAndOwnerId(UUID cardId, UUID ownerdId);
+	List<Card> findByAccountIdAndStatus(UUID accountId, CardStatus status);
+	boolean existsByIdAndOwnerId(UUID cardId, UUID ownerdId);
 	
     /**
      * Carte active d'un compte — au plus une carte active par compte
      * dans la configuration standard.
      */
 
-	Optional<Card> findByAccountIdAndStatus(UUID accountId, CardStatus status, Pageable pageable);
+	Page<Card> findByAccountIdAndStatus(UUID accountId, CardStatus status, Pageable pageable);
 	
     /**
      * Charge la carte avec son propriétaire et son compte en JOIN FETCH.
@@ -131,7 +131,7 @@ public interface CardRepository extends JpaRepository<Card, UUID> {
     		UPDATE Card c
     		SET c.pinBlocked = true,
     		c.status = 'BLOCKED',
-    		c.blockedAt = :now
+    		c.blockedAt = :now ,
     		c.updatedAt = :now
     		WHERE c.id = :id
     		""")

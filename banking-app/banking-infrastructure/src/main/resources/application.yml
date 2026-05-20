@@ -1,0 +1,178 @@
+# ═══════════════════════════════════════════════════════════════
+#  banking-infrastructure — Configuration commune
+#  Valeurs partagées par tous les profils (dev, prod).
+#  Les secrets (mots de passe, clés API) ne figurent JAMAIS ici.
+#  Ils sont surchargés par les profils ou injectés via les variables
+#  d'environnement / Spring Config Server / HashiCorp Vault.
+# ═══════════════════════════════════════════════════════════════
+
+spring:
+
+  # ── Nom de l'application ────────────────────────────────────
+  application:
+    name: banking-infrastructure
+
+  # ── JPA / Hibernate ─────────────────────────────────────────
+  jpa:
+    open-in-view: false                        # désactivé — évite les lazy loads non intentionnels
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        use_sql_comments: false
+        jdbc:
+          batch_size: 25                       # batch INSERT/UPDATE
+          fetch_size: 50
+          order_inserts: true
+          order_updates: true
+        connection:
+          provider_disables_autocommit: true   # optimisation pool
+        cache:
+          use_second_level_cache: false        # Redis gère le cache applicatif
+          use_query_cache: false
+        generate_statistics: false
+
+  # ── Liquibase ───────────────────────────────────────────────
+  liquibase:
+    change-log: classpath:/db/changelog/db.changelog-master.xml
+    enabled: true
+    drop-first: false
+
+  # ── Redis ───────────────────────────────────────────────────
+  data:
+    redis:
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 1000ms
+
+  # ── Kafka ───────────────────────────────────────────────────
+  kafka:
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.bank.domain.event"
+        session.timeout.ms: 30000
+        heartbeat.interval.ms: 10000
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        compression.type: lz4
+        linger.ms: 5
+        batch.size: 16384
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: 2
+      missing-topics-fatal: false
+
+  # ── Mail ────────────────────────────────────────────────────
+  mail:
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+        debug: false
+
+  # ── Thymeleaf ───────────────────────────────────────────────
+  thymeleaf:
+    prefix: classpath:/templates/
+    suffix: .html
+    encoding: UTF-8
+    mode: HTML
+    cache: true                                # désactivé en dev
+
+  # ── Jackson ─────────────────────────────────────────────────
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: NON_NULL
+    time-zone: UTC
+
+# ── Configuration métier bancaire ─────────────────────────────
+banking:
+
+  # Chiffrement AES-256 (clé surchargée par profil / Vault)
+  encryption:
+    key: ${BANKING_ENCRYPTION_KEY:}            # obligatoire en prod
+
+  # JWT
+  jwt:
+    secret: ${BANKING_JWT_SECRET:}             # obligatoire en prod
+    expiration: 900000                         # 15 min (ms)
+    refresh-expiration: 604800000              # 7 jours (ms)
+
+  # Email
+  mail:
+    from: noreply@bank.com
+    from-name: "Votre Banque"
+    compliance: compliance@bank.com
+    enabled: true
+
+  # SMS Twilio (valeurs surchargées par profil)
+  twilio:
+    account-sid: ${TWILIO_ACCOUNT_SID:}
+    auth-token: ${TWILIO_AUTH_TOKEN:}
+    from-number: ${TWILIO_FROM_NUMBER:}
+  sms:
+    enabled: true
+
+  # Push Firebase FCM
+  firebase:
+    credentials-path: firebase/service-account.json
+    project-id: ${FIREBASE_PROJECT_ID:banking-app}
+  push:
+    enabled: true
+
+  # Kafka — topics
+  kafka:
+    producer:
+      retries: 3
+      acks: all
+    topics:
+      transactions: banking.transactions
+      fraud-alerts: banking.fraud-alerts
+      account-events: banking.account-events
+      notifications: banking.notifications
+
+  # Limites de transaction
+  transaction:
+    daily-limit-default: 10000.00
+    single-transfer-limit: 50000.00
+    aml-threshold: 10000.00                    # seuil déclaration TRACFIN
+
+  # Fraude — seuils du moteur de scoring
+  fraud:
+    score-threshold-medium: 0.40
+    score-threshold-high: 0.70
+    score-threshold-critical: 0.90
+    velocity-window-minutes: 60               # fenêtre glissante velocity check
+    velocity-max-transactions: 10
+    velocity-max-amount: 5000.00
+
+# ── Gestion asynchrone — thread pool notifications ────────────
+async:
+  notification:
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 200
+    thread-name-prefix: "notif-"
+    keep-alive-seconds: 60

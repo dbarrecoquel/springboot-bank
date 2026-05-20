@@ -214,7 +214,7 @@ public class Transaction {
      * @return une instance Transaction avec statut {@code PENDING}
      */
     
-    public Transaction create(String reference, TransactionType type,
+    public static Transaction create(String reference, TransactionType type,
     		BigDecimal amount, CurrencyCode currency, Account account,
     		String label) {
     	

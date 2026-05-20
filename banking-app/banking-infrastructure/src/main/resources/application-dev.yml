@@ -1,0 +1,151 @@
+# ═══════════════════════════════════════════════════════════════
+#  banking-infrastructure — Profil DEV
+#  Activer via : SPRING_PROFILES_ACTIVE=dev
+#  Usage       : développement local + CI/CD (tests d'intégration)
+#
+#  Différences clés vs prod :
+#    - Base de données locale (docker-compose)
+#    - MailHog remplace le vrai SMTP (emails interceptés sur :8025)
+#    - Twilio + Firebase désactivés (mocks)
+#    - Logs SQL activés pour le débogage
+#    - Liquibase en mode drop-first désactivé (mais DDL auto = update)
+#    - Clé JWT/AES en dur (ne jamais utiliser en prod)
+# ═══════════════════════════════════════════════════════════════
+
+spring:
+
+  config:
+    activate:
+      on-profile: dev
+
+  # ── DataSource — PostgreSQL local (docker-compose) ──────────
+  datasource:
+    url: jdbc:postgresql://localhost:5432/bankingdb
+    username: bankuser
+    password: bankpassword
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: BankingHikariDev
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 30000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+      connection-test-query: SELECT 1
+      auto-commit: false
+
+  # ── JPA — logs SQL activés ──────────────────────────────────
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: validate                       # Liquibase gère le schéma
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+        generate_statistics: false
+
+  # ── Liquibase ───────────────────────────────────────────────
+  liquibase:
+    enabled: true
+    drop-first: false
+
+  # ── Redis local ─────────────────────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: redispassword
+      database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  # ── Kafka local ─────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: banking-dev-group
+    listener:
+      missing-topics-fatal: false              # évite l'échec au démarrage si topics absents
+
+  # ── MailHog — SMTP de test ──────────────────────────────────
+  mail:
+    host: localhost
+    port: 1025
+    username:                                  # MailHog n'exige pas d'authentification
+    password:
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+            required: false
+
+  # ── Thymeleaf — cache désactivé ─────────────────────────────
+  thymeleaf:
+    cache: false
+
+  # ── Jackson — indentation pour lisibilité dev ───────────────
+  jackson:
+    serialization:
+      indent-output: true
+
+# ── Configuration métier bancaire — valeurs dev ───────────────
+banking:
+
+  encryption:
+    # Clé AES-256 en Base64 URL-safe — 32 octets — DEV UNIQUEMENT
+    # Générer via : EncryptionUtil.encodeKey(EncryptionUtil.generateKey())
+    key: "dev-aes256-key-base64-CHANGE_IN_PROD_32bytes_exactly!!"
+
+  jwt:
+    secret: "dev-secret-key-min-256-bits-for-hs256-algorithm-change-in-prod!!"
+    expiration: 3600000                        # 1 heure en dev (plus pratique)
+    refresh-expiration: 86400000               # 24 heures en dev
+
+  mail:
+    from: noreply@bank-dev.local
+    from-name: "Banque DEV"
+    compliance: dev-compliance@bank-dev.local
+    enabled: true                              # MailHog intercepte les emails
+
+  twilio:
+    account-sid: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    auth-token: "dev-auth-token"
+    from-number: "+15005550006"                # numéro Twilio de test
+  sms:
+    enabled: false                             # SMS désactivés en dev
+
+  firebase:
+    credentials-path: firebase/service-account-dev.json
+    project-id: banking-app-dev
+  push:
+    enabled: false                             # Push désactivé en dev
+
+  fraud:
+    score-threshold-medium: 0.40
+    score-threshold-high: 0.70
+    score-threshold-critical: 0.90
+    velocity-window-minutes: 60
+    velocity-max-transactions: 10
+    velocity-max-amount: 5000.00
+
+# ── Logs — niveau DEBUG pour les packages applicatifs ─────────
+logging:
+  level:
+    root: INFO
+    com.bank: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.kafka: INFO
+    org.springframework.data.redis: DEBUG
+    org.springframework.mail: DEBUG
+    org.liquibase: INFO
+  pattern:
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx"
+  file:
+    name: logs/banking-dev.log

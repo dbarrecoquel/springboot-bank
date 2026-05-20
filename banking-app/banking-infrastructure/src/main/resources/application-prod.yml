@@ -1,0 +1,225 @@
+# ═══════════════════════════════════════════════════════════════
+#  banking-infrastructure — Profil PROD
+#  Activer via : SPRING_PROFILES_ACTIVE=prod
+#
+#  RÈGLES ABSOLUES pour ce fichier :
+#    ① Aucun secret en clair — tout passe par ${ENV_VAR} ou Vault
+#    ② Toutes les URLs pointent vers les infras de production
+#    ③ Logs SQL désactivés (performances + sécurité PCI-DSS)
+#    ④ Pool de connexions dimensionné pour la charge attendue
+#    ⑤ Timeouts agressifs — fail fast plutôt que bloquer
+#
+#  Variables d'environnement obligatoires au démarrage :
+#    DB_URL, DB_USERNAME, DB_PASSWORD
+#    REDIS_HOST, REDIS_PASSWORD
+#    KAFKA_BOOTSTRAP_SERVERS
+#    BANKING_ENCRYPTION_KEY
+#    BANKING_JWT_SECRET
+#    TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+#    FIREBASE_PROJECT_ID
+#    SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+# ═══════════════════════════════════════════════════════════════
+
+spring:
+
+  config:
+    activate:
+      on-profile: prod
+
+  # ── DataSource — PostgreSQL production ──────────────────────
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: BankingHikariProd
+      maximum-pool-size: 30                    # ajuster selon les pods K8s
+      minimum-idle: 10
+      idle-timeout: 600000                     # 10 min
+      connection-timeout: 5000                 # 5 s — fail fast
+      max-lifetime: 1800000                    # 30 min (< PostgreSQL idle timeout)
+      keepalive-time: 120000                   # ping toutes les 2 min
+      connection-test-query: SELECT 1
+      auto-commit: false
+      leak-detection-threshold: 60000          # alerte si connexion tenue > 1 min
+      data-source-properties:
+        socketTimeout: 30                      # secondes (niveau TCP)
+        tcpKeepAlive: true
+        sslmode: require                       # TLS obligatoire en prod
+        ApplicationName: banking-api-prod
+
+  # ── JPA — SQL désactivé ─────────────────────────────────────
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate                       # Liquibase gère le schéma — JAMAIS create/update
+    properties:
+      hibernate:
+        format_sql: false
+        use_sql_comments: false
+        generate_statistics: false
+        jdbc:
+          batch_size: 50                       # batch plus large en prod
+        connection:
+          provider_disables_autocommit: true
+
+  # ── Liquibase ───────────────────────────────────────────────
+  liquibase:
+    enabled: true
+    drop-first: false                          # JAMAIS true en prod
+    contexts: prod
+
+  # ── Redis cluster ───────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      database: 0
+      ssl:
+        enabled: true                          # TLS Redis en prod
+      timeout: 1000ms                          # fail fast
+      lettuce:
+        shutdown-timeout: 200ms
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 8
+          max-wait: 500ms
+          time-between-eviction-runs: 60000ms
+
+  # ── Kafka — cluster dédié ───────────────────────────────────
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    security:
+      protocol: SASL_SSL
+    properties:
+      sasl.mechanism: PLAIN
+      sasl.jaas.config: >
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="${KAFKA_USERNAME}"
+        password="${KAFKA_PASSWORD}";
+      ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_PATH:}
+      ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+      socket.connection.setup.timeout.ms: 10000
+      socket.connection.setup.timeout.max.ms: 30000
+    consumer:
+      group-id: banking-prod-group
+      auto-offset-reset: earliest
+      max-poll-records: 10
+      heartbeat-interval: 3000
+      session-timeout: 30000
+    producer:
+      acks: all
+      retries: 5
+      properties:
+        max.in.flight.requests.per.connection: 1   # idempotence stricte
+        request.timeout.ms: 30000
+        delivery.timeout.ms: 120000
+
+  # ── SMTP — serveur production ───────────────────────────────
+  mail:
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 10000
+          writetimeout: 10000
+          ssl:
+            trust: ${SMTP_HOST}
+
+  # ── Thymeleaf — cache activé ────────────────────────────────
+  thymeleaf:
+    cache: true
+
+  # ── Jackson ─────────────────────────────────────────────────
+  jackson:
+    serialization:
+      indent-output: false                     # JSON compact en prod
+
+# ── Configuration métier bancaire — valeurs prod ──────────────
+banking:
+
+  encryption:
+    key: ${BANKING_ENCRYPTION_KEY}             # Vault / Secrets Manager
+
+  jwt:
+    secret: ${BANKING_JWT_SECRET}              # Vault / Secrets Manager
+    expiration: 900000                         # 15 min
+    refresh-expiration: 604800000              # 7 jours
+
+  mail:
+    from: ${BANKING_MAIL_FROM:noreply@bank.com}
+    from-name: ${BANKING_MAIL_FROM_NAME:Votre Banque}
+    compliance: ${BANKING_MAIL_COMPLIANCE:compliance@bank.com}
+    enabled: true
+
+  twilio:
+    account-sid: ${TWILIO_ACCOUNT_SID}
+    auth-token: ${TWILIO_AUTH_TOKEN}
+    from-number: ${TWILIO_FROM_NUMBER}
+  sms:
+    enabled: true
+
+  firebase:
+    credentials-path: ${FIREBASE_CREDENTIALS_PATH:firebase/service-account.json}
+    project-id: ${FIREBASE_PROJECT_ID}
+  push:
+    enabled: true
+
+  transaction:
+    daily-limit-default: 10000.00
+    single-transfer-limit: 50000.00
+    aml-threshold: 10000.00
+
+  fraud:
+    score-threshold-medium: 0.40
+    score-threshold-high: 0.70
+    score-threshold-critical: 0.90
+    velocity-window-minutes: 60
+    velocity-max-transactions: 10
+    velocity-max-amount: 5000.00
+
+# ── Gestion asynchrone — thread pool notifications ────────────
+async:
+  notification:
+    core-pool-size: 8
+    max-pool-size: 32
+    queue-capacity: 500
+    thread-name-prefix: "notif-prod-"
+    keep-alive-seconds: 30
+
+# ── Logs — JSON structuré pour ELK / Datadog ──────────────────
+logging:
+  level:
+    root: WARN
+    com.bank: INFO
+    org.hibernate.SQL: OFF
+    org.springframework.kafka: WARN
+    org.springframework.security: WARN
+    org.liquibase: WARN
+  pattern:
+    # JSON structuré — parsé par Logstash/Datadog
+    console: >
+      {"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}",
+       "level":"%p",
+       "thread":"%t",
+       "logger":"%logger{36}",
+       "traceId":"%X{traceId:-}",
+       "spanId":"%X{spanId:-}",
+       "message":"%msg",
+       "exception":"%ex{full}"}%n
+  file:
+    name: /var/log/banking/banking-prod.log
+    max-size: 100MB
+    max-history: 30
+    total-size-cap: 3GB
