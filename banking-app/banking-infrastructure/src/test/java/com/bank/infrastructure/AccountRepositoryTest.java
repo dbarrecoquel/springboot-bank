@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -65,7 +70,7 @@ public class AccountRepositoryTest {
     @BeforeEach()
     void setUp() {
     	alice = buildUser("alice@bank.com","alice","alice");
-    	bob = buildUser("alice@bank.com", "bob", "bob");
+    	bob = buildUser("bob@bank.com", "bob", "bob");
     	em.persistAndFlush(alice);
     	em.persistAndFlush(bob);
     	
@@ -140,6 +145,30 @@ public class AccountRepositoryTest {
     		assertThat(accountRepository.existsByIban("TOTO")).isFalse();
     	}
     	
+    }
+    
+    @Nested
+    @DisplayName("Recherche par propriétaire") 
+    class FindByOwnerTests{
+    	
+    	@Test
+    	@DisplayName("findByOwnerIdOrderByCreatedAt")
+    	void findByOwnerId_allAccounts() {
+    		List<Account> accounts = accountRepository.findByOwnerIdOrderByCreatedAtDesc(alice.getId());
+    		
+    		assertThat(accounts).hasSize(2);
+    		assertThat(accounts).extracting(Account::getAccountNumber).containsExactlyInAnyOrder("ACC-001","ACC-002");
+    		
+    	}
+    	
+    	@Test
+    	@DisplayName("findByOwnerId - paginé")
+    	void findByOwnerId_pageable() {
+    		Page<Account> accounts = accountRepository.findByOwnerId(alice.getId(),  PageRequest.of(0, 1, Sort.by("createdAt").descending()));
+    		
+    		assertThat(accounts.getTotalElements()).isEqualTo(2);
+    		assertThat(accounts.getContent()).hasSize(1);
+    	}
     }
     
     private User buildUser(String email, String firstName, String lastName) {
