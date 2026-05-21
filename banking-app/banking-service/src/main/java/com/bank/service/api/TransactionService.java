@@ -8,8 +8,6 @@ import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.repository.query.Param;
-
 import com.bank.domain.entity.Transaction;
 import com.bank.domain.enums.TransactionStatus;
 import com.bank.domain.enums.TransactionType;
