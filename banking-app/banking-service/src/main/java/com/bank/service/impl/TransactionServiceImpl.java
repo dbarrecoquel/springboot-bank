@@ -13,15 +13,18 @@ import com.bank.domain.entity.Transaction;
 import com.bank.infrastructure.persistence.TransactionRepository;
 import com.bank.service.api.TransactionService;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
-@Transactional
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class TransactionServiceImpl implements TransactionService {
 
 	private final TransactionRepository transactionRepository;
 	
-	public TransactionServiceImpl(TransactionRepository transactionRepository) {
-		this.transactionRepository = transactionRepository;
-	}
+	
 	@Override
 	public List<Transaction> getAllTransactions() {
 		return transactionRepository.findAll();
@@ -32,17 +35,27 @@ public class TransactionServiceImpl implements TransactionService {
 	}
 		
 	@Override
+	@Transactional
 	public Transaction saveTransaction(Transaction transaction) {
 		return transactionRepository.save(transaction);
 	}
 	@Override
-	public Page<Transaction> getAllAds(Pageable page) {
+	public Page<Transaction> getAllTransactions(Pageable page) {
 		return transactionRepository.findAll(page);
 	}
 	
 	@Override
+	@Transactional
 	public void deleteTransaction(UUID id) {
 		transactionRepository.deleteById(id);
+	}
+	@Override
+	public Optional<Transaction> findByReference(String reference) {
+		return transactionRepository.findByReference(reference);
+	}
+	@Override
+	public boolean existsByReference(String reference) {
+		return transactionRepository.existsByReference(reference);
 	}
 	
 }

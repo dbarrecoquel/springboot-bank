@@ -14,6 +14,9 @@ public interface TransactionService {
 	public List<Transaction> getAllTransactions();
 	public Optional<Transaction> getTransactionById(UUID id);
 	public Transaction saveTransaction(Transaction transaction);
-	public Page<Transaction> getAllAds(Pageable page);
+	public Page<Transaction> getAllTransactions(Pageable page);
 	public void deleteTransaction(UUID id);
+	
+	public Optional<Transaction> findByReference(String reference);
+    public boolean existsByReference(String reference);
 }

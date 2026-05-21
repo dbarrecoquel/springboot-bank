@@ -50,7 +50,7 @@ public interface CardRepository extends JpaRepository<Card, UUID> {
      */
 	@Query("""
 			SELECT c FROM Card c
-			where c.status = 'Active'
+			where c.status = 'ACTIVE'
 			AND c.expiryDate BETWEEN :from AND :to
 			ORDER BY c.expiryDate ASC
 			""")
@@ -62,7 +62,7 @@ public interface CardRepository extends JpaRepository<Card, UUID> {
      */
 	@Query("""
 			SELECT c FROM Card c
-			where c.status = 'Active'
+			where c.status = 'ACTIVE'
 			AND c.expiryDate < :today
 			""")
 	List<Card> findExpiredNotYetMarked(@Param("today") LocalDate today);
