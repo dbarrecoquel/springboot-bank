@@ -218,7 +218,7 @@ public class User {
     		this.lockedUntil = LocalDateTime.now().plusMinutes(30);
     }
     
-    public void recordSuccessfullLogin() {
+    public void recordSuccessfulLogin() {
     	this.failedLoginAttempts = 0;
     	this.lockedUntil = null;
     	this.lastLoginAt = LocalDateTime.now();

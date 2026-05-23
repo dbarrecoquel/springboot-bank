@@ -37,7 +37,10 @@
             <groupId>com.bank</groupId>
             <artifactId>banking-common</artifactId>
         </dependency>
-
+ 		<dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-infrastructure</artifactId>
+        </dependency>
         <!-- ══════════════════════════════════════════════════
              Spring Security 6
              Inclut : spring-security-core, web, config, crypto
@@ -85,9 +88,9 @@
              Protection force brute et DDoS au niveau filtre
         ═══════════════════════════════════════════════════════ -->
         <dependency>
-            <groupId>com.github.vladimir-bukhtoyarov</groupId>
-            <artifactId>bucket4j-core</artifactId>
-        </dependency>
+		    <groupId>com.bucket4j</groupId>
+		    <artifactId>bucket4j-core</artifactId>
+		</dependency>
 
         <!-- ══════════════════════════════════════════════════
              Web — nécessaire pour OncePerRequestFilter,

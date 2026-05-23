@@ -23,7 +23,10 @@
             <groupId>com.bank</groupId>
             <artifactId>banking-infrastructure</artifactId>
         </dependency>
-
+		<dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-security</artifactId>
+        </dependency>
         <!-- ══════════════════════════════════════════════════
              Persistance — Spring Data JPA + Hibernate + PostgreSQL
         ═══════════════════════════════════════════════════════ -->
@@ -31,5 +34,9 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
+        <dependency>
+		    <groupId>org.springframework.boot</groupId>
+		    <artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
 	</dependencies>
 </project>
