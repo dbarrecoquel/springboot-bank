@@ -11,8 +11,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Card;
 import com.bank.domain.enums.CardStatus;
+import com.bank.infrastructure.persistence.AuditLogRepository;
 import com.bank.infrastructure.persistence.CardRepository;
 import com.bank.service.api.CardService;
 
@@ -26,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 public class CardServiceImpl implements CardService{
 	
 	private final CardRepository cardRepository;
-	
+	private final AuditLogRepository auditLogRepository;
 	@Override
 	public List<Card> getAllCards() {
 		return cardRepository.findAll();
@@ -91,14 +94,24 @@ public class CardServiceImpl implements CardService{
 	@Transactional
 	public void updateStatus(UUID id, CardStatus status) {
 		
-		int updated = cardRepository.updateStatus(id, status, LocalDateTime.now());
+		Card card = cardRepository.findById(id).orElseThrow(() -> new IllegalArgumentException(
+	                "Card introuvable : " + id));
 		
-		if (updated == 0)
-		{
-			 throw new IllegalArgumentException("Carte introuvable : " + id);
-		}
 		
-		 log.warn("[CARD] Status updated id={} status={}",id,status);
+		if (!card.getStatus().canTransitionTo(status))
+			 throw UnauthorizedOperationException.invalidTransition(
+		                "Card", id,
+		                card.getStatus().name(), status.name());
+		
+		cardRepository.updateStatus(id, status, LocalDateTime.now());
+		
+		auditLogRepository.save(AuditLog.success(
+                "Card Updated", "Card",
+                id.toString(), null,
+                "status=" + status.name()
+            ));
+
+		log.warn("[CARD] Status updated id={} status={}",id,status);
 		
 	}
 	@Override

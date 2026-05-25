@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.eq;import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,11 +28,15 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import com.bank.common.exception.UnauthorizedOperationException;
 import com.bank.domain.entity.Account;
+import com.bank.domain.entity.AuditLog;
 import com.bank.domain.enums.AccountStatus;
 import com.bank.domain.enums.AccountType;
+import com.bank.domain.enums.CardStatus;
 import com.bank.domain.enums.CurrencyCode;
 import com.bank.infrastructure.persistence.AccountRepository;
+import com.bank.infrastructure.persistence.AuditLogRepository;
 import com.bank.service.impl.AccountServiceImpl;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,6 +44,9 @@ public class AccountServiceTest {
 
 	@Mock
 	private AccountRepository accountRepository;
+	
+	@Mock
+	private AuditLogRepository auditLogRepository;
 	
 	@InjectMocks
 	private AccountServiceImpl accountService;
@@ -310,34 +317,65 @@ public class AccountServiceTest {
 	
 	@Test
 	void shouldUpdateStatus() {
+		account.setStatus(AccountStatus.ACTIVE);
+
+	    when(accountRepository.findById(accountId))
+	            .thenReturn(Optional.of(account));
 		when(accountRepository.updateStatus(eq(accountId), eq(AccountStatus.BLOCKED) , any(LocalDateTime.class))).thenReturn(1);
 		
 		assertDoesNotThrow(() -> accountService.updateStatus(accountId, AccountStatus.BLOCKED));
 		
+		verify(accountRepository).findById(accountId);
+		
 		verify(accountRepository).updateStatus(eq(accountId), eq(AccountStatus.BLOCKED) , any(LocalDateTime.class));
+
+		verify(auditLogRepository)
+        .save(any(AuditLog.class));
 		
 	}
 	
 	@Test
     void shouldThrowExceptionWhenUpdateStatusFails() {
-        when(accountRepository.updateStatus(
-                eq(accountId),
-                eq(AccountStatus.CLOSED),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
+		
+		 when(accountRepository.findById(accountId))
+         .thenReturn(Optional.empty());
+		 
 
-        assertThrows(
+        IllegalArgumentException exception = assertThrows(
                 IllegalArgumentException.class,
                 () -> accountService.updateStatus(accountId, AccountStatus.CLOSED)
         );
+        assertTrue(exception.getMessage().contains("Compte introuvable"));
+        verify(accountRepository).findById(accountId);
+        verify(accountRepository, never())
+        .updateStatus(any(), any(), any());
+    }
+	@Test
+    void shouldThrowExceptionWhenTransitionToPending() {
+		
+		account.setStatus(AccountStatus.BLOCKED);
+		
+		 when(accountRepository.findById(accountId))
+         .thenReturn(Optional.of(account));
+		 
 
-        verify(accountRepository)
-                .updateStatus(eq(accountId),
-                        eq(AccountStatus.CLOSED),
-                        any(LocalDateTime.class));
+		 UnauthorizedOperationException exception = assertThrows(
+				 UnauthorizedOperationException.class,
+                () -> accountService.updateStatus(accountId, AccountStatus.PENDING_VALIDATION)
+        );
+        assertTrue(exception.getMessage().contains("Transition interdite"));
+        verify(accountRepository).findById(accountId);
+        verify(accountRepository, never())
+        .updateStatus(any(), any(), any());
     }
 	@Test
     void shouldBlockAccount() {
+		
+		account.setStatus(AccountStatus.ACTIVE);
+
+	    when(accountRepository.findById(accountId))
+	            .thenReturn(Optional.of(account));
+	    
         when(accountRepository.updateStatus(
                 eq(accountId),
                 eq(AccountStatus.BLOCKED),
@@ -345,15 +383,23 @@ public class AccountServiceTest {
                 .thenReturn(1);
 
         accountService.blockAccount(accountId);
-
+        
+        verify(accountRepository).findById(accountId);
         verify(accountRepository)
                 .updateStatus(eq(accountId),
                         eq(AccountStatus.BLOCKED),
                         any(LocalDateTime.class));
+        verify(auditLogRepository)
+        .save(any(AuditLog.class));
     }
 	
 	@Test
     void shouldCloseAccount() {
+		account.setStatus(AccountStatus.ACTIVE);
+		
+		when(accountRepository.findById(accountId))
+        .thenReturn(Optional.of(account));
+		
         when(accountRepository.updateStatus(
                 eq(accountId),
                 eq(AccountStatus.CLOSED),
@@ -361,11 +407,14 @@ public class AccountServiceTest {
                 .thenReturn(1);
 
         accountService.closeAccount(accountId);
-
+        
+        verify(accountRepository).findById(accountId);
         verify(accountRepository)
                 .updateStatus(eq(accountId),
                         eq(AccountStatus.CLOSED),
                         any(LocalDateTime.class));
+        verify(auditLogRepository)
+        .save(any(AuditLog.class));
     }
 	@Test
     void shouldSumBalanceByOwnerAndCurrency() {

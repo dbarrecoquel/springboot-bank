@@ -12,11 +12,14 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bank.common.exception.UnauthorizedOperationException;
 import com.bank.domain.entity.Account;
+import com.bank.domain.entity.AuditLog;
 import com.bank.domain.enums.AccountStatus;
 import com.bank.domain.enums.AccountType;
 import com.bank.domain.enums.CurrencyCode;
 import com.bank.infrastructure.persistence.AccountRepository;
+import com.bank.infrastructure.persistence.AuditLogRepository;
 import com.bank.service.api.AccountService;
 
 import lombok.RequiredArgsConstructor;
@@ -29,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class AccountServiceImpl implements AccountService {
 	
 	private final AccountRepository accountRepository;
-
+	private final AuditLogRepository auditLogRepository;
 	@Override
 	public List<Account> getAllAccounts() {
 		return accountRepository.findAll();
@@ -131,6 +134,8 @@ public class AccountServiceImpl implements AccountService {
 	@Transactional
 	public void updateBalance(UUID accountId, BigDecimal balance) {
 		
+		
+		
 		int updated = accountRepository.updateBalance(accountId, balance, LocalDateTime.now());
 		
 		if (updated == 0)
@@ -144,13 +149,23 @@ public class AccountServiceImpl implements AccountService {
 	@Override
 	@Transactional
     public void updateStatus(UUID accountId, AccountStatus status) {
+		Account account = accountRepository.findById(accountId).orElseThrow(()->new IllegalArgumentException("Compte introuvable : " + accountId));
+		
+		if (!account.getStatus().canTransitionTo(status))
+		{
+			throw UnauthorizedOperationException.invalidTransition(
+	                "Account", accountId,
+	                account.getStatus().name(), status.name());
+		}
+        accountRepository.updateStatus(accountId,status,LocalDateTime.now());
+        
+        auditLogRepository.save(AuditLog.success(
+                "Account Updated", "Account",
+                accountId.toString(), null,
+                "status=" + status.name()
+            ));
 
-        int updated = accountRepository.updateStatus(accountId,status,LocalDateTime.now());
-
-        if (updated == 0)
-        {
-            throw new IllegalArgumentException("Compte introuvable : " + accountId);
-        }
+       
 
         log.warn("[ACCOUNT] Status updated accountId={} status={}",accountId,status);
     }

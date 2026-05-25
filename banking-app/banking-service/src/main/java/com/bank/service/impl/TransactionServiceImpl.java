@@ -11,10 +11,18 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.domain.entity.Account;
+import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Transaction;
+import com.bank.domain.enums.AccountStatus;
+import com.bank.domain.enums.CurrencyCode;
 import com.bank.domain.enums.TransactionStatus;
 import com.bank.domain.enums.TransactionType;
+import com.bank.infrastructure.persistence.AccountRepository;
+import com.bank.infrastructure.persistence.AuditLogRepository;
 import com.bank.infrastructure.persistence.TransactionRepository;
+import com.bank.service.api.FraudDetectionService;
 import com.bank.service.api.TransactionService;
 
 import lombok.RequiredArgsConstructor;
@@ -27,8 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 public class TransactionServiceImpl implements TransactionService {
 
 	private final TransactionRepository transactionRepository;
-	
-	
+	private final AuditLogRepository auditLogRepository;
 	@Override
 	public List<Transaction> getAllTransactions() {
 		return transactionRepository.findAll();
@@ -97,13 +104,25 @@ public class TransactionServiceImpl implements TransactionService {
 	@Transactional
 	public void updateStatus(UUID id, TransactionStatus status, LocalDateTime updatedAt) {
 		
-		int updated = transactionRepository.updateStatus(id, status, updatedAt);
+		Transaction tx = transactionRepository.findById(id)
+	            .orElseThrow(() -> new IllegalArgumentException(
+	                "Transaction introuvable : " + id));
+	 
+        if (!tx.getStatus().canTransitionTo(status)) {
+            throw UnauthorizedOperationException.invalidTransition(
+                "Transaction", id,
+                tx.getStatus().name(), status.name());
+        }
 		
-		if (updated == 0)
-		{
-			throw new IllegalArgumentException("transaction id not found :" + id);
-		}
-		log.warn("[TRANSACTION] Status updated id={} status={}",id,status);
+		transactionRepository.updateStatus(id, status, updatedAt);
+		
+		 auditLogRepository.save(AuditLog.success(
+	                status.name(), "Transaction",
+	                id.toString(), null,
+	                "ref=" + tx.getReference()
+	            ));
+	     
+	            log.info("[TX] status={} — id={} ref={}", status.name(), id, tx.getReference());
 		
 	}
 	@Override  
@@ -150,15 +169,29 @@ public class TransactionServiceImpl implements TransactionService {
 	}
 	@Override
 	@Transactional
-	public void settle(UUID id, LocalDateTime settledAt) {
+	public void settle(UUID id) {
 		
-		int updated = transactionRepository.settle(id, settledAt);
+		Transaction tx = transactionRepository.findById(id)
+	            .orElseThrow(() -> new IllegalArgumentException(
+	                "Transaction introuvable : " + id));
+	 
+        if (!tx.getStatus().canTransitionTo(TransactionStatus.SETTLED)) {
+            throw UnauthorizedOperationException.invalidTransition(
+                "Transaction", id,
+                tx.getStatus().name(), TransactionStatus.SETTLED.name());
+        }
+
+		transactionRepository.settle(id, LocalDateTime.now());
 		
-		if (updated == 0)
-		{
-			throw new IllegalArgumentException("transaction id not found :" + id);
-		}
-		log.warn("[TRANSACTION] settle updated id={}",id);
+		
+        auditLogRepository.save(AuditLog.success(
+                "TRANSACTION_SETTLED", "Transaction",
+                id.toString(), null,
+                "ref=" + tx.getReference()
+            ));
+     
+            log.info("[TX] Réglée — id={} ref={}", id, tx.getReference());
+
 
 	}
 	@Override
@@ -198,6 +231,33 @@ public class TransactionServiceImpl implements TransactionService {
 	public Page<Transaction> findAmlCandidates(BigDecimal threshold, LocalDateTime from, LocalDateTime to,
 			Pageable pageable) {
 		return transactionRepository.findAmlCandidates(threshold, from, to, pageable);
+	}
+	
+	@Override
+	public String generateReference() {
+	    return "TX-" + UUID.randomUUID()
+	            .toString()
+	            .replace("-", "")
+	            .substring(0, 16)
+	            .toUpperCase();
+	}
+	@Override
+	public Transaction initiateSepaTransfer(UUID sourceAccountId, UUID requesterId, String destinationIban,
+			String beneficiaryName, BigDecimal amount, CurrencyCode currency, String label, String endToEndId,
+			boolean instant) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+	@Override
+	public Transaction initiateInternalTransfer(UUID sourceAccountId, UUID destinationAccountId, UUID requesterId,
+			BigDecimal amount, CurrencyCode currency, String label) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+	@Override
+	public Transaction cashDeposit(UUID accountId, UUID operatorId, BigDecimal amount, CurrencyCode currency) {
+		// TODO Auto-generated method stub
+		return null;
 	}
 	
 	

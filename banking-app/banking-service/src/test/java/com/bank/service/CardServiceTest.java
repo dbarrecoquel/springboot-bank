@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,9 +28,11 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Card;
-import com.bank.domain.enums.AccountStatus;
 import com.bank.domain.enums.CardStatus;
+import com.bank.infrastructure.persistence.AuditLogRepository;
 import com.bank.infrastructure.persistence.CardRepository;
 import com.bank.service.impl.CardServiceImpl;
 
@@ -38,6 +41,9 @@ public class CardServiceTest {
 
 	@Mock
 	private CardRepository cardRepository;
+	
+	@Mock
+	private AuditLogRepository auditLogRepository;
 	
 	@InjectMocks
 	private CardServiceImpl cardService;
@@ -244,180 +250,246 @@ public class CardServiceTest {
 	
 	@Test
 	void shouldUpdateStatus() {
-		
-		when(cardRepository.updateStatus(eq(cardId), eq(CardStatus.BLOCKED) , any(LocalDateTime.class))).thenReturn(1);
-		
-		assertDoesNotThrow(() -> cardService.updateStatus(cardId, CardStatus.BLOCKED));
-		
-		verify(cardRepository).updateStatus(eq(cardId), eq(CardStatus.BLOCKED) , any(LocalDateTime.class));
-		
-	}
-	@Test
-    void shouldThrowExceptionWhenUpdateStatusFails() {
-        when(cardRepository.updateStatus(
-                eq(cardId),
-                eq(CardStatus.BLOCKED),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> cardService.updateStatus(cardId, CardStatus.BLOCKED)
-        );
-        
-        assertTrue(exception.getMessage().contains("Carte introuvable"));
-        
-        verify(cardRepository)
-                .updateStatus(eq(cardId),
-                        eq(CardStatus.BLOCKED),
-                        any(LocalDateTime.class));
-    }
-	
+	    card.setStatus(CardStatus.ACTIVE);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    when(cardRepository.updateStatus(
+	            eq(cardId),
+	            eq(CardStatus.BLOCKED),
+	            any(LocalDateTime.class)))
+	            .thenReturn(1);
+
+	    assertDoesNotThrow(() ->
+	            cardService.updateStatus(cardId, CardStatus.BLOCKED));
+
+	    verify(cardRepository)
+	            .findById(cardId);
+
+	    verify(cardRepository)
+	            .updateStatus(
+	                    eq(cardId),
+	                    eq(CardStatus.BLOCKED),
+	                    any(LocalDateTime.class));
+
+	    verify(auditLogRepository)
+	            .save(any(AuditLog.class));
+	}
+
+	@Test
+	void shouldThrowExceptionWhenCardNotFound() {
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.empty());
+
+	    IllegalArgumentException exception = assertThrows(
+	            IllegalArgumentException.class,
+	            () -> cardService.updateStatus(cardId, CardStatus.BLOCKED)
+	    );
+
+	    assertTrue(exception.getMessage().contains("Card introuvable"));
+
+	    verify(cardRepository).findById(cardId);
+
+	    verify(cardRepository, never())
+	            .updateStatus(any(), any(), any());
+	}
+
+	@Test
+	void shouldThrowUnauthorizedOperationExceptionWhenTransitionInvalid() {
+
+	    card.setStatus(CardStatus.EXPIRED);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    assertThrows(
+	            UnauthorizedOperationException.class,
+	            () -> cardService.updateStatus(cardId, CardStatus.ACTIVE)
+	    );
+
+	    verify(cardRepository).findById(cardId);
+
+	    verify(cardRepository, never())
+	            .updateStatus(any(), any(), any());
+
+	    verify(auditLogRepository, never())
+	            .save(any(AuditLog.class));
+	}
+
 	@Test
 	void shouldBlockCard() {
-		
-		when(cardRepository.updateStatus(eq(cardId), eq(CardStatus.BLOCKED) , any(LocalDateTime.class))).thenReturn(1);
-		
-		assertDoesNotThrow(() -> cardService.blockCard(cardId));
-		
-		verify(cardRepository).updateStatus(eq(cardId), eq(CardStatus.BLOCKED) , any(LocalDateTime.class));
+
+	    card.setStatus(CardStatus.ACTIVE);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    when(cardRepository.updateStatus(
+	            eq(cardId),
+	            eq(CardStatus.BLOCKED),
+	            any(LocalDateTime.class)))
+	            .thenReturn(1);
+
+	    assertDoesNotThrow(() -> cardService.blockCard(cardId));
+
+	    verify(cardRepository)
+	            .updateStatus(
+	                    eq(cardId),
+	                    eq(CardStatus.BLOCKED),
+	                    any(LocalDateTime.class));
 	}
-	@Test
-    void shouldThrowExceptionWhenBlockCardFails() {
-        when(cardRepository.updateStatus(
-                eq(cardId),
-                eq(CardStatus.BLOCKED),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> cardService.blockCard(cardId)
-        );
-        
-        assertTrue(exception.getMessage().contains("Carte introuvable"));
-        
-        verify(cardRepository)
-                .updateStatus(eq(cardId),
-                        eq(CardStatus.BLOCKED),
-                        any(LocalDateTime.class));
-    }
 	@Test
-	void shouldExpiredCard() {
-		
-		when(cardRepository.updateStatus(eq(cardId), eq(CardStatus.EXPIRED) , any(LocalDateTime.class))).thenReturn(1);
-		
-		assertDoesNotThrow(() -> cardService.expiredCard(cardId));
-		
-		verify(cardRepository).updateStatus(eq(cardId), eq(CardStatus.EXPIRED) , any(LocalDateTime.class));
+	void shouldExpireCard() {
+
+	    card.setStatus(CardStatus.ACTIVE);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    when(cardRepository.updateStatus(
+	            eq(cardId),
+	            eq(CardStatus.EXPIRED),
+	            any(LocalDateTime.class)))
+	            .thenReturn(1);
+
+	    assertDoesNotThrow(() -> cardService.expiredCard(cardId));
+
+	    verify(cardRepository)
+	            .updateStatus(
+	                    eq(cardId),
+	                    eq(CardStatus.EXPIRED),
+	                    any(LocalDateTime.class));
 	}
-	@Test
-    void shouldThrowExceptionWhenExpiredCardFails() {
-        when(cardRepository.updateStatus(
-                eq(cardId),
-                eq(CardStatus.EXPIRED),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> cardService.expiredCard(cardId)
-        );
-
-        assertTrue(exception.getMessage().contains("Carte introuvable"));
-        
-        verify(cardRepository)
-                .updateStatus(eq(cardId),
-                        eq(CardStatus.EXPIRED),
-                        any(LocalDateTime.class));
-    }
 	@Test
-	void shouldCancelledCard() {
-		
-		when(cardRepository.updateStatus(eq(cardId), eq(CardStatus.CANCELLED) , any(LocalDateTime.class))).thenReturn(1);
-		
-		assertDoesNotThrow(() -> cardService.cancelledCard(cardId));
-		
-		verify(cardRepository).updateStatus(eq(cardId), eq(CardStatus.CANCELLED) , any(LocalDateTime.class));
+	void shouldCancelCardFromBlockedStatus() {
+
+	    card.setStatus(CardStatus.BLOCKED);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    when(cardRepository.updateStatus(
+	            eq(cardId),
+	            eq(CardStatus.CANCELLED),
+	            any(LocalDateTime.class)))
+	            .thenReturn(1);
+
+	    assertDoesNotThrow(() -> cardService.cancelledCard(cardId));
+
+	    verify(cardRepository)
+	            .updateStatus(
+	                    eq(cardId),
+	                    eq(CardStatus.CANCELLED),
+	                    any(LocalDateTime.class));
 	}
-	@Test
-    void shouldThrowExceptionWhenCancelledCardFails() {
-        when(cardRepository.updateStatus(
-                eq(cardId),
-                eq(CardStatus.CANCELLED),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> cardService.cancelledCard(cardId)
-        );
-
-        assertTrue(exception.getMessage().contains("Carte introuvable"));
-        
-        verify(cardRepository)
-                .updateStatus(eq(cardId),
-                        eq(CardStatus.CANCELLED),
-                        any(LocalDateTime.class));
-    }
 	@Test
-	void shouldActiveCard() {
-		
-		when(cardRepository.updateStatus(eq(cardId), eq(CardStatus.ACTIVE) , any(LocalDateTime.class))).thenReturn(1);
-		
-		assertDoesNotThrow(() -> cardService.activeCard(cardId));
-		
-		verify(cardRepository).updateStatus(eq(cardId), eq(CardStatus.ACTIVE) , any(LocalDateTime.class));
+	void shouldActivateCardFromInactiveStatus() {
+
+	    card.setStatus(CardStatus.INACTIVE);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    when(cardRepository.updateStatus(
+	            eq(cardId),
+	            eq(CardStatus.ACTIVE),
+	            any(LocalDateTime.class)))
+	            .thenReturn(1);
+
+	    assertDoesNotThrow(() -> cardService.activeCard(cardId));
+
+	    verify(cardRepository)
+	            .updateStatus(
+	                    eq(cardId),
+	                    eq(CardStatus.ACTIVE),
+	                    any(LocalDateTime.class));
 	}
-	@Test
-    void shouldThrowExceptionWhenActiveCardFails() {
-        when(cardRepository.updateStatus(
-                eq(cardId),
-                eq(CardStatus.ACTIVE),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> cardService.activeCard(cardId)
-        );
-
-        assertTrue(exception.getMessage().contains("Carte introuvable"));
-        
-        verify(cardRepository)
-                .updateStatus(eq(cardId),
-                        eq(CardStatus.ACTIVE),
-                        any(LocalDateTime.class));
-    }
 	@Test
-	void shouldDisableCard() {
-		
-		when(cardRepository.updateStatus(eq(cardId), eq(CardStatus.INACTIVE) , any(LocalDateTime.class))).thenReturn(1);
-		
-		assertDoesNotThrow(() -> cardService.disableCard(cardId));
-		
-		verify(cardRepository).updateStatus(eq(cardId), eq(CardStatus.INACTIVE) , any(LocalDateTime.class));
+	void shouldReactivateBlockedCard() {
+
+	    card.setStatus(CardStatus.BLOCKED);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    when(cardRepository.updateStatus(
+	            eq(cardId),
+	            eq(CardStatus.ACTIVE),
+	            any(LocalDateTime.class)))
+	            .thenReturn(1);
+
+	    assertDoesNotThrow(() -> cardService.activeCard(cardId));
+
+	    verify(cardRepository)
+	            .updateStatus(
+	                    eq(cardId),
+	                    eq(CardStatus.ACTIVE),
+	                    any(LocalDateTime.class));
 	}
+
 	@Test
-    void shouldThrowExceptionWhenDisableCardFails() {
-        when(cardRepository.updateStatus(
-                eq(cardId),
-                eq(CardStatus.INACTIVE),
-                any(LocalDateTime.class)))
-                .thenReturn(0);
+	void shouldThrowExceptionWhenDisableCardTransitionInvalid() {
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> cardService.disableCard(cardId)
-        );
+	    card.setStatus(CardStatus.ACTIVE);
 
-        assertTrue(exception.getMessage().contains("Carte introuvable"));
-        
-        verify(cardRepository)
-                .updateStatus(eq(cardId),
-                        eq(CardStatus.INACTIVE),
-                        any(LocalDateTime.class));
-    }
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    assertThrows(
+	            UnauthorizedOperationException.class,
+	            () -> cardService.disableCard(cardId)
+	    );
+
+	    verify(cardRepository).findById(cardId);
+
+	    verify(cardRepository, never())
+	            .updateStatus(any(), any(), any());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenTryingToReactivateCancelledCard() {
+
+	    card.setStatus(CardStatus.CANCELLED);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    assertThrows(
+	            UnauthorizedOperationException.class,
+	            () -> cardService.activeCard(cardId)
+	    );
+
+	    verify(cardRepository).findById(cardId);
+
+	    verify(cardRepository, never())
+	            .updateStatus(any(), any(), any());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenTryingSameStatusTransition() {
+
+	    card.setStatus(CardStatus.ACTIVE);
+
+	    when(cardRepository.findById(cardId))
+	            .thenReturn(Optional.of(card));
+
+	    assertThrows(
+	            UnauthorizedOperationException.class,
+	            () -> cardService.updateStatus(cardId, CardStatus.ACTIVE)
+	    );
+
+	    verify(cardRepository).findById(cardId);
+
+	    verify(cardRepository, never())
+	            .updateStatus(any(), any(), any());
+	}
 	@Test
 	void shouldBlockAllActiveByAccount() {
 		

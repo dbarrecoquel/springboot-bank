@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.bank.domain.entity.Transaction;
+import com.bank.domain.enums.CurrencyCode;
 import com.bank.domain.enums.TransactionStatus;
 import com.bank.domain.enums.TransactionType;
 
@@ -38,7 +39,7 @@ public interface TransactionService {
 	public void reversedTransaction(UUID id, LocalDateTime updatedAt);
 	public void confirmedTransaction(UUID id, LocalDateTime updatedAt);
 	public void blockedTransaction(UUID id, LocalDateTime updatedAt);
-	public void settle(UUID id, LocalDateTime settledAt);
+	public void settle(UUID id);
 	public void flagFraud(UUID id, BigDecimal score, LocalDateTime updatedAt);
 	public long countRecentByAccount(UUID accountId, LocalDateTime since);
 	public BigDecimal sumDebitedAmountSince(UUID accountId, LocalDateTime since);
@@ -46,4 +47,61 @@ public interface TransactionService {
 	public BigDecimal sumSettledByTypeAndPeriod(UUID accountId, List<TransactionType> types,LocalDateTime from, LocalDateTime to);
 	public List<Object[]> volumeByTypeAndPeriod(LocalDateTime from,LocalDateTime to);
 	public Page<Transaction> findAmlCandidates(BigDecimal threshold,LocalDateTime from, LocalDateTime to, Pageable pageable);
+	
+    /**
+     * Initie un virement SEPA (standard ou instantané).
+     *
+     * @param sourceAccountId  identifiant du compte débité
+     * @param requesterId      identifiant de l'utilisateur demandeur (contrôle ownership)
+     * @param destinationIban  IBAN du compte bénéficiaire
+     * @param beneficiaryName  nom du bénéficiaire
+     * @param amount           montant positif
+     * @param currency         devise (doit être SEPA-compatible)
+     * @param label            motif du virement (max 140 caractères)
+     * @param endToEndId       identifiant bout-en-bout (nullable — généré si absent)
+     * @param instant          {@code true} pour SCT Inst, {@code false} pour SCT standard
+     * @return transaction créée avec statut PENDING
+     */
+    public Transaction initiateSepaTransfer(UUID sourceAccountId, UUID requesterId,
+                                      String destinationIban, String beneficiaryName,
+                                      BigDecimal amount, CurrencyCode currency,
+                                      String label, String endToEndId, boolean instant);
+ 
+    /**
+     * Initie un virement interne entre deux comptes de la banque.
+     *
+     * @param sourceAccountId      identifiant du compte débité
+     * @param destinationAccountId identifiant du compte crédité
+     * @param requesterId          identifiant du demandeur
+     * @param amount               montant
+     * @param currency             devise
+     * @param label                motif
+     * @return transaction créée avec statut PENDING
+     */
+    public Transaction initiateInternalTransfer(UUID sourceAccountId, UUID destinationAccountId,
+                                          UUID requesterId, BigDecimal amount,
+                                          CurrencyCode currency, String label);
+ 
+    /**
+     * Enregistre un dépôt d'espèces sur un compte.
+     *
+     * @param accountId   identifiant du compte crédité
+     * @param operatorId  identifiant de l'opérateur (guichetier)
+     * @param amount      montant du dépôt
+     * @param currency    devise
+     * @return transaction créée
+     */
+    public Transaction cashDeposit(UUID accountId, UUID operatorId,
+                             BigDecimal amount, CurrencyCode currency);
+ 
+ 
+    /**
+     * Génère une référence de transaction unique.
+     * Format : TXN-YYYYMMDD-XXXXXX
+     *
+     * @return référence unique
+     */
+    public String generateReference();
+
+		
 }
