@@ -102,6 +102,21 @@ public interface TransactionService {
      * @return référence unique
      */
     public String generateReference();
+	public Transaction initiateInternationalTransfer(UUID sourceAccountId, UUID requesterId, String destinationIban,
+			String beneficiaryName, String beneficiaryBic, BigDecimal amount, CurrencyCode currency, String label);
+	public Transaction cashWithdrawal(UUID accountId, UUID cardId, UUID requesterId, BigDecimal amount, CurrencyCode currency);
+	public Transaction cardPayment(UUID accountId, UUID cardId, UUID requesterId, BigDecimal amount, CurrencyCode currency,
+			String merchandName, String label);
+	public Transaction cardRefund(UUID accountId, UUID originalTransactionId, UUID requesterId, BigDecimal amount,
+			CurrencyCode currency, String reason);
+	public Transaction directDebit(UUID accountId, String mandateId, String creditorName, String creditorIban,
+			BigDecimal amount, CurrencyCode currency, String label);
+	public Transaction directDebitRefund(UUID accountId, UUID originalTransactionId, UUID requesterId);
+	public Transaction creditInterest(UUID accountId, BigDecimal amount, CurrencyCode currency, String periodLabel);
+	public Transaction debitInterest(UUID accountId, BigDecimal amount, CurrencyCode currency, String periodLabel);
+	public Transaction applyFee(UUID accountId, BigDecimal amount, CurrencyCode currency, String feeType);
+	public Transaction currencyExchange(UUID sourceAccountId, UUID destinationAccountId, UUID requesterId, BigDecimal amount,
+			CurrencyCode fromCurrency, CurrencyCode toCurrency, BigDecimal exchangeRate);
 
 		
 }
