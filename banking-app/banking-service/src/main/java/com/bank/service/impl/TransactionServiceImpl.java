@@ -377,7 +377,7 @@ public class TransactionServiceImpl implements TransactionService {
 		
 		Account source = loadAndLock(sourceAccountId);
 		
-		assertOwnerOrOperator(source, sourceAccountId, label);
+		assertOwnerOrOperator(source, requesterId, label);
 		assertActive(source, "INTERNATIONAL_TRANSFER");
 		assertSufficientFunds(source, amount);
 		
@@ -747,7 +747,7 @@ public class TransactionServiceImpl implements TransactionService {
                  reference, amount, fromCurrency, convertedAmount, toCurrency, exchangeRate);
         return saved;
     }
-
+    
     private Account[] lockTwoAccounts(UUID sourceId, UUID destinationId) {
         UUID firstId  = sourceId.compareTo(destinationId) < 0 ? sourceId : destinationId;
         UUID secondId = firstId.equals(sourceId) ? destinationId : sourceId;
