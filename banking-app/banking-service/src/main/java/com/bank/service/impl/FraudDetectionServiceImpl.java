@@ -128,7 +128,7 @@ public class FraudDetectionServiceImpl implements FraudDetectionService {
 
         // Règle 7 — FIRST_TRANSFER_TO_IBAN
         if (event.counterpartIban() != null
-                && isFirstTransferToIban(event.accountId(), event.counterpartIban())) {
+                && isFirstTransferToIban(event.accountId(), event.counterpartIban()) && (event.type() == TransactionType.SEPA_TRANSFER || event.type() == TransactionType.INTERNATIONAL_TRANSFER)) {
             score += 0.10;
             rules.add("FIRST_TRANSFER_TO_IBAN");
         }

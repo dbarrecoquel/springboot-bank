@@ -31,8 +31,8 @@ public record FraudAlertEvent(
 		public static Severity fromScore(BigDecimal score) {
 			double s = score.doubleValue();
 			if (s >= 0.95) return CRITICAL;
-			if (s >= 0.90) return HIGH;
-			if (s >= 0.70) return MEDIUM;
+			if (s >= 0.75) return HIGH;
+			if (s >= 0.40) return MEDIUM;
 			return LOW;
 		}
 	}
