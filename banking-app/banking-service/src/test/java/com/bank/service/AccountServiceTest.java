@@ -1,20 +1,27 @@
 package com.bank.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.times;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,16 +35,33 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import com.bank.common.dto.AccountDTO;
+import com.bank.common.dto.TransactionDTO;
+import com.bank.common.dto.TransactionDTO.Summary;
+import com.bank.common.exception.BankingException;
 import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.common.mapper.AccountMapper;
+import com.bank.common.mapper.TransactionMapper;
 import com.bank.domain.entity.Account;
 import com.bank.domain.entity.AuditLog;
+import com.bank.domain.entity.Transaction;
+import com.bank.domain.entity.User;
 import com.bank.domain.enums.AccountStatus;
 import com.bank.domain.enums.AccountType;
 import com.bank.domain.enums.CardStatus;
 import com.bank.domain.enums.CurrencyCode;
+import com.bank.domain.enums.TransactionStatus;
+import com.bank.domain.enums.TransactionType;
+import com.bank.domain.enums.UserRole;
+import com.bank.domain.event.AccountBlockedEvent;
+import com.bank.infrastructure.messaging.TransactionEventProducer;
 import com.bank.infrastructure.persistence.AccountRepository;
 import com.bank.infrastructure.persistence.AuditLogRepository;
+import com.bank.infrastructure.persistence.TransactionRepository;
+import com.bank.infrastructure.persistence.UserRepository;
 import com.bank.service.impl.AccountServiceImpl;
+
+import net.bytebuddy.NamingStrategy.Suffixing.BaseNameResolver.ForGivenType;
 
 @ExtendWith(MockitoExtension.class)
 public class AccountServiceTest {
@@ -48,10 +72,25 @@ public class AccountServiceTest {
 	@Mock
 	private AuditLogRepository auditLogRepository;
 	
+	@Mock
+	private AccountMapper accountMapper;
+	
+	@Mock
+	private UserRepository userRepository;
+	@Mock
+	private TransactionEventProducer eventProducer;
+	
+	@Mock
+	private TransactionRepository transactionRepository;
+	
+	@Mock
+	private TransactionMapper transactionMapper;
+	
 	@InjectMocks
 	private AccountServiceImpl accountService;
 	
 	private Account account;
+	private User alice;
 	private UUID accountId;
 	private UUID ownerId;
 	
@@ -61,8 +100,13 @@ public class AccountServiceTest {
 		accountId = UUID.randomUUID();
 		ownerId = UUID.randomUUID();
 		
-		account = new Account();
-		account.setId(accountId);
+		alice = User.create("Alice", "Alice", LocalDate.of(1985, 10, 1), "alice@bank.fr", "password");
+	    alice.setId(ownerId);
+
+	    // 2. Il faut impérativement passer 'alice' comme dernier paramètre ici !
+	    account = Account.create("FR7630006000011234567890189", "ACC-001", AccountType.CURRENT, CurrencyCode.EUR, alice);
+	    account.setId(accountId);
+	    account.setBalance(BigDecimal.valueOf(2000));
 		account.setIban("FR761234567890");
 		account.setAccountNumber("ACC123456");
 	}
@@ -511,5 +555,463 @@ public class AccountServiceTest {
 
         verify(accountRepository)
                 .findAccountsWithExpiringCards(from, to);
+    }
+    
+    @Test
+    void shouldFindByOwnerIdDTO_asOwner() {
+    	
+    	UUID accountId = account.getId();
+    	UUID requesterId = ownerId;
+    	
+    	Set<UserRole> roles = Set.of(UserRole.CUSTOMER);
+    	
+    	AccountDTO expectedDTO = buildAccountDTO(accountId, requesterId);
+    	
+    	given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.of(account));
+    	given(accountMapper.toDto(account)).willReturn(expectedDTO);
+    	
+    	AccountDTO result = accountService.findById(accountId, requesterId, roles);
+    	
+    	assertThat(result).isNotNull();
+    	assertThat(result).isEqualTo(expectedDTO);
+    	
+    	then(accountRepository).should(times(1)).findByIdWithOwner(accountId);
+    	then(accountMapper).should(times(1)).toDto(account);
+    	
+    	
+    }
+    @Test
+    void shouldFindByOwnerIdDTO_asEmployerOrAdmin() {
+    	
+    	UUID strangerId = UUID.randomUUID();
+    	Set<UserRole> roles = Set.of(UserRole.CUSTOMER, UserRole.TELLER);
+    	
+    	AccountDTO expectedDTO = buildAccountDTO(accountId, strangerId);
+    	
+    	given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.of(account));
+    	given(accountMapper.toDto(account)).willReturn(expectedDTO);
+    	
+    	AccountDTO result = accountService.findById(accountId, strangerId, roles);
+    	assertThat(result).isNotNull();
+    	then(accountRepository).should(times(1)).findByIdWithOwner(accountId);
+    	
+    }
+    @Test
+    void findById_accountNotFound(){
+    	
+    	UUID unknownId = UUID.randomUUID();
+		given(accountRepository.findByIdWithOwner(unknownId)).willReturn(Optional.empty());
+		assertThatThrownBy(() -> 
+			accountService.findById(unknownId, alice.getId(), Set.of(UserRole.CUSTOMER))
+		).isInstanceOf(BankingException.class)
+		 .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Compte introuvable");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+		 });
+		
+		then(accountMapper).should(never()).toDto(any());
+    }
+    @Test
+    void findById_access_denied() {
+    	
+    	UUID unknowId = UUID.randomUUID();
+    	given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.of(account));
+    	
+    	assertThatThrownBy(() -> 
+		accountService.findById(accountId, unknowId, Set.of(UserRole.CUSTOMER))
+		).isInstanceOf(BankingException.class)
+		 .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Accès refusé à ce compte");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCESS_DENIED");
+		 });
+	
+    	then(accountMapper).should(never()).toDto(any());
+    }
+    @Test
+    void findByOwnerId_success() {
+    	
+    	AccountDTO.Summary summary1 = mock(AccountDTO.Summary.class);
+    	given(accountRepository.findByOwnerIdOrderByCreatedAtDesc(alice.getId())).willReturn(List.of(account));
+    	given(accountMapper.toSummary(account)).willReturn(summary1);
+    	
+    	List<AccountDTO.Summary> result = accountService.findByOwnerId(alice.getId());
+    	
+    	assertThat(result).isNotNull();
+    	assertThat(result).hasSize(1);
+    	assertThat(result).containsExactly(summary1);
+    	then(accountRepository).should(times(1)).findByOwnerIdOrderByCreatedAtDesc(ownerId);
+		then(accountMapper).should(times(1)).toSummary(account);
+    	
+    }
+    @Test
+    void findByOwnerId_emptyList(){
+    	
+    	UUID unknowId = UUID.randomUUID();
+    	given(accountRepository.findByOwnerIdOrderByCreatedAtDesc(unknowId)).willReturn(List.of());
+    	
+    	List<AccountDTO.Summary> result = accountService.findByOwnerId(unknowId);
+    	
+    	assertThat(result).isNotNull();
+    	assertThat(result).isEmpty();
+    	
+
+    	then(accountRepository).should(times(1)).findByOwnerIdOrderByCreatedAtDesc(unknowId);
+		then(accountMapper).should(never()).toSummary(account);
+    	
+    }
+    @Test
+    void updateLabel_success() {
+    	
+    	Set<UserRole> roles = Set.of(UserRole.CUSTOMER);
+    	AccountDTO expectedDto = buildAccountDTO(accountId, alice.getId());
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	given(accountRepository.save(account)).willReturn(account);
+    	given(accountMapper.toDto(account)).willReturn(expectedDto);
+    	
+    	AccountDTO result = accountService.updateLabel(accountId,"label", alice.getId(), roles);
+    	
+    	assertThat(result).isNotNull();
+    	
+    	then(accountRepository).should(times(1)).findById(accountId);
+    	then(accountRepository).should(times(1)).save(account);
+    	then(accountMapper).should(times(1)).toDto(account);
+    }
+    @Test
+    void updateLabel_asEmployeOrAdmin() {
+    	Set<UserRole> roles = Set.of(UserRole.TELLER);
+    	AccountDTO expectedDto = buildAccountDTO(accountId, alice.getId());
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	given(accountRepository.save(account)).willReturn(account);
+    	given(accountMapper.toDto(account)).willReturn(expectedDto);
+    	
+    	AccountDTO result = accountService.updateLabel(accountId,"label", alice.getId(), roles);
+    	
+    	assertThat(result).isNotNull();
+    	
+    	then(accountRepository).should(times(1)).findById(accountId);
+    	then(accountRepository).should(times(1)).save(account);
+    	then(accountMapper).should(times(1)).toDto(account);
+    }
+    @Test
+    void updateLabel_access_denied() {
+    	
+    	UUID unknowId = UUID.randomUUID();
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	
+    	assertThatThrownBy(() -> 
+		accountService.updateLabel(accountId, "label",unknowId, Set.of(UserRole.CUSTOMER))
+		).isInstanceOf(BankingException.class)
+		 .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Accès refusé à ce compte");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCESS_DENIED");
+		 });
+	
+    	then(accountMapper).should(never()).toDto(any());
+    }
+    @Test
+    void updateLabel_statusClosed() {
+    	
+    	account.setStatus(AccountStatus.CLOSED);
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	assertThatThrownBy(() -> 
+		accountService.updateLabel(accountId, "label",alice.getId(), Set.of(UserRole.CUSTOMER))
+		).isInstanceOf(BankingException.class)
+		 .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Accès refusé à ce compte");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_CLOSED");
+		 });
+	
+    	then(accountMapper).should(never()).toDto(any());
+    }
+    @Test
+    void blockAccountSuccess() {
+
+    	AccountDTO expectedDto = buildAccountDTO(accountId, alice.getId(), AccountStatus.BLOCKED);
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	given(accountRepository.updateStatus(eq(accountId), eq(AccountStatus.BLOCKED), any(LocalDateTime.class))).willReturn(1);
+    	given(accountMapper.toDto(account)).willReturn(expectedDto);
+    	
+    	 AccountDTO accountDto =  accountService.blockAccount(accountId,"", UUID.randomUUID());
+    	 
+    	 assertThat(accountDto).isNotNull();
+    	 assertThat(accountDto.status()).isEqualTo(AccountStatus.BLOCKED);
+    	 then(accountRepository).should(times(1)).findById(accountId);
+    	 then(accountRepository).should(times(1)).updateStatus(eq(accountId), eq(AccountStatus.BLOCKED), any(LocalDateTime.class));
+    	 then(eventProducer).should(times(1)).publishAccountBlocked(any(AccountBlockedEvent.class));
+    	 then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+    	 then(accountMapper).should(times(1)).toDto(account);
+    	
+    }
+    @Test
+    void blockAccount_failedWithClosed() {
+    	
+    	account.setStatus(AccountStatus.CLOSED);
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	
+    	assertThatThrownBy(() -> 
+			accountService.blockAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(UnauthorizedOperationException.class);
+    	
+
+   	    then(accountRepository).should(times(1)).findById(accountId);
+	   	then(eventProducer).should(never()).publishAccountBlocked(any(AccountBlockedEvent.class));
+	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.BLOCKED), any(LocalDateTime.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(accountMapper).should(never()).toDto(account);
+    }
+    @Test
+    void blockAccount_notFoundAccount() {
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.empty());
+    	
+    	assertThatThrownBy(() -> 
+			accountService.blockAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Compte introuvable");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+		 });;
+    	
+
+   	    then(accountRepository).should(times(1)).findById(accountId);
+	   	then(eventProducer).should(never()).publishAccountBlocked(any(AccountBlockedEvent.class));
+	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.BLOCKED), any(LocalDateTime.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(accountMapper).should(never()).toDto(account);
+    	
+    }
+    @Test
+    void unblockAccount_success() {
+    	AccountDTO expectedDto = buildAccountDTO(accountId, alice.getId(), AccountStatus.ACTIVE);
+    	account.setStatus(AccountStatus.BLOCKED);
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	given(accountRepository.updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class))).willReturn(1);
+    	given(accountMapper.toDto(account)).willReturn(expectedDto);
+    	
+    	 AccountDTO accountDto =  accountService.unblockAccount(accountId,"", UUID.randomUUID());
+    	 
+    	 assertThat(accountDto).isNotNull();
+    	 assertThat(accountDto.status()).isEqualTo(AccountStatus.ACTIVE);
+    	 then(accountRepository).should(times(1)).findById(accountId);
+    	 then(accountRepository).should(times(1)).updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class));
+    	 then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+    	 then(accountMapper).should(times(1)).toDto(account);
+    }
+    @Test
+    void unblockAccount_failedWithClosed() {
+    	
+    	account.setStatus(AccountStatus.CLOSED);
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	
+    	assertThatThrownBy(() -> 
+			accountService.unblockAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(UnauthorizedOperationException.class);
+    	
+
+   	    then(accountRepository).should(times(1)).findById(accountId);
+	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(accountMapper).should(never()).toDto(account);
+    }
+    @Test
+    void unblockAccount_notFoundAccount() {
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.empty());
+    	
+    	assertThatThrownBy(() -> 
+			accountService.unblockAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Compte introuvable");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+		 });;
+    	
+
+   	    then(accountRepository).should(times(1)).findById(accountId);
+	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(accountMapper).should(never()).toDto(account);
+    	
+    }
+    @Test
+    void closeAccount_success() {
+    	
+    	account.setBalance(BigDecimal.ZERO);
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	given(accountRepository.updateStatus(eq(accountId), eq(AccountStatus.CLOSED), any(LocalDateTime.class))).willReturn(1);
+    	
+    	accountService.closeAccount(accountId, "", UUID.randomUUID());
+    	
+    	then(accountRepository).should(times(1)).findById(accountId);
+    	then(accountRepository).should(times(1)).updateStatus(eq(accountId), eq(AccountStatus.CLOSED), any(LocalDateTime.class));
+    	then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+    	
+    }
+    @Test
+    void closeAccountNotFound() {
+    	
+    	given(accountRepository.findById(accountId)).willReturn(Optional.empty());
+    	
+    	assertThatThrownBy(() -> 
+			accountService.closeAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Compte introuvable");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+		 });;
+    	
+
+   	    then(accountRepository).should(times(1)).findById(accountId);
+	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(accountMapper).should(never()).toDto(account);
+    	
+    }
+    @Test
+    void closeAccountFailled_balance() {
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	
+    	assertThatThrownBy(() -> 
+		accountService.closeAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Le solde");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_BALANCE_NOT_ZERO");
+		 });
+    	then(accountRepository).should(times(1)).findById(accountId);
+ 	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class));
+ 		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+ 		then(accountMapper).should(never()).toDto(account);
+    }
+    @Test
+    void closedAccount_failedWithClosed() {
+    	account.setBalance(BigDecimal.ZERO);
+    	account.setStatus(AccountStatus.CLOSED);
+    	given(accountRepository.findById(accountId)).willReturn(Optional.of(account));
+    	
+    	assertThatThrownBy(() -> 
+			accountService.closeAccount(accountId, "label", UUID.randomUUID())
+		).isInstanceOf(UnauthorizedOperationException.class);
+    	
+
+   	    then(accountRepository).should(times(1)).findById(accountId);
+	   	then(accountRepository).should(never()).updateStatus(eq(accountId), eq(AccountStatus.ACTIVE), any(LocalDateTime.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(accountMapper).should(never()).toDto(account);
+    }
+    @Test
+    void getTransactionsSuccess_withoutDate() {
+
+    	Transaction tx = buildTransaction(account, TransactionType.SEPA_TRANSFER, TransactionStatus.APPROVED, BigDecimal.valueOf(100));
+        TransactionDTO.Summary summary = buildTransactionDTOSummary(tx.getId());
+        Pageable pageable = PageRequest.of(0, 10);
+        
+        Page<Transaction> txPage = new PageImpl<>(List.of(tx), pageable, 1);
+        Set<UserRole> roles = Set.of(UserRole.CUSTOMER);
+
+        given(accountRepository.findByIdWithOwner(account.getId())).willReturn(Optional.of(account));
+        given(transactionRepository.findByAccountIdOrderByCreatedAtDesc(account.getId(), pageable)).willReturn(txPage);
+        given(transactionMapper.toSummary(tx)).willReturn(summary);
+
+        Page<TransactionDTO.Summary> result = accountService.getTransactions(
+            account.getId(), alice.getId(), roles, null, null, pageable
+        );
+
+        assertThat(result).isNotNull();
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().get(0)).isEqualTo(summary);
+
+        then(accountRepository).should(times(1)).findByIdWithOwner(account.getId());
+        then(transactionRepository).should(times(1)).findByAccountIdOrderByCreatedAtDesc(account.getId(), pageable);
+        then(transactionRepository).should(never()).findByAccountIdAndPeriod(any(), any(), any(), any());
+        then(transactionMapper).should(times(1)).toSummary(tx);
+    	
+    }
+    @Test
+    void getTransactionsSuccess_withDatePeriod() {
+        // Given
+        Transaction tx = buildTransaction(account, TransactionType.SEPA_TRANSFER, TransactionStatus.APPROVED, BigDecimal.valueOf(100));
+        TransactionDTO.Summary summary = buildTransactionDTOSummary(tx.getId());
+        Pageable pageable = PageRequest.of(0, 10);
+        Page<Transaction> txPage = new PageImpl<>(List.of(tx), pageable, 1);
+        Set<UserRole> roles = Set.of(UserRole.CUSTOMER);
+
+        String fromStr = "2026-01-01T00:00:00";
+        String toStr = "2026-01-31T23:59:59";
+
+        given(accountRepository.findByIdWithOwner(account.getId())).willReturn(Optional.of(account));
+        
+        given(transactionRepository.findByAccountIdAndPeriod(eq(account.getId()), any(LocalDateTime.class), any(LocalDateTime.class), eq(pageable)))
+            .willReturn(txPage);
+        given(transactionMapper.toSummary(tx)).willReturn(summary);
+
+        // When
+        Page<TransactionDTO.Summary> result = accountService.getTransactions(
+            account.getId(), alice.getId(), roles, fromStr, toStr, pageable
+        );
+
+        // Then
+        assertThat(result).isNotNull();
+        assertThat(result.getContent()).hasSize(1);
+
+        then(accountRepository).should(times(1)).findByIdWithOwner(account.getId());
+        then(transactionRepository).should(times(1)).findByAccountIdAndPeriod(eq(account.getId()), any(LocalDateTime.class), any(LocalDateTime.class), eq(pageable));
+        then(transactionRepository).should(never()).findByAccountIdOrderByCreatedAtDesc(any(), any());
+        then(transactionMapper).should(times(1)).toSummary(tx);
+    }
+  
+	private AccountDTO buildAccountDTO(UUID accountId, UUID ownerId, AccountStatus status) {
+        return new AccountDTO(
+            accountId,
+            "FR7630006000011234567890189",
+            "ACC-001",
+            AccountType.CURRENT,
+            "Compte Courant",
+            status,
+            CurrencyCode.EUR,
+            BigDecimal.valueOf(2000),
+            BigDecimal.valueOf(2000),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            "Compte principal",
+            ownerId,
+            "Alice Alice",
+            java.time.LocalDateTime.now(),
+            java.time.LocalDateTime.now(),
+            null
+        );
+    }
+    private AccountDTO buildAccountDTO(UUID accountId, UUID ownerId) {
+    	return buildAccountDTO(accountId, ownerId, AccountStatus.ACTIVE);
+    }
+    private Transaction buildTransaction(Account account, TransactionType type, TransactionStatus status, BigDecimal amount) {
+		Transaction tx = Transaction.create(
+			"TXN-TEST-" + UUID.randomUUID().toString().substring(0, 6),
+			type, amount, CurrencyCode.EUR, account, "Test"
+		);
+		tx.setStatus(status);
+		tx.setId(UUID.randomUUID());
+		return tx;
+    }
+    private TransactionDTO.Summary buildTransactionDTOSummary(UUID transactionId) {
+        return new TransactionDTO.Summary(
+            transactionId,
+            "TXN-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
+            TransactionType.SEPA_TRANSFER,
+            TransactionStatus.PENDING,
+            BigDecimal.valueOf(150.00),
+            CurrencyCode.EUR,
+            "Bob Bob",
+            "Remboursement dîner",
+            java.time.LocalDateTime.now()
+        );
     }
 }

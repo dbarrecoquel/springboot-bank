@@ -1,9 +1,204 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
-  <parent>
-    <groupId>com.bank</groupId>
-    <artifactId>banking-app</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-  </parent>
-  <artifactId>banking-api</artifactId>
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ══════════════════════════════════════════════════════
+         Référence au parent
+    ═══════════════════════════════════════════════════════════ -->
+    <parent>
+        <groupId>com.bank</groupId>
+        <artifactId>banking-app</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>banking-api</artifactId>
+    <packaging>jar</packaging>
+    <name>banking-api</name>
+    <description>
+        Point d'entrée de l'application — controllers REST, configuration Spring Boot,
+        OpenAPI, Actuator, tracing Micrometer.
+        Seul module exécutable (spring-boot-maven-plugin activé ici uniquement).
+    </description>
+
+    <dependencies>
+
+        <!-- ══════════════════════════════════════════════════
+             Modules internes — toute la pile applicative
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-service</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.bank</groupId>
+            <artifactId>banking-infrastructure</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Spring Boot Web — serveur embarqué Tomcat + Spring MVC
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Validation — @Valid sur les request bodies des controllers
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             OpenAPI / Swagger UI
+             Génère automatiquement la documentation REST depuis les annotations
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Actuator — health, metrics, info, env
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Micrometer — métriques Prometheus + tracing Zipkin
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.reporter2</groupId>
+            <artifactId>zipkin-reporter-brave</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Jackson — sérialisation JSON + support java.time
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Lombok
+        ═══════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ══════════════════════════════════════════════════
+             Tests
+        ═══════════════════════════════════════════════════════ -->
+
+        <!-- Tests unitaires + Mockito -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- @WebMvcTest — tests de la couche controller -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Tests d'intégration — @SpringBootTest + Testcontainers -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <!-- ══════════════════════════════════════════════════════
+         Build — spring-boot-maven-plugin actif UNIQUEMENT ici
+         Produit le fat JAR exécutable
+    ═══════════════════════════════════════════════════════════ -->
+    <build>
+        <plugins>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <!-- Repackage le JAR en fat JAR exécutable -->
+                            <goal>repackage</goal>
+                            <!-- Génère build-info.properties pour /actuator/info -->
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <mainClass>com.bank.api.BankingApplication</mainClass>
+                    <!-- Décompose le JAR en couches pour l'optimisation Docker -->
+                    <layers>
+                        <enabled>true</enabled>
+                    </layers>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+
 </project>

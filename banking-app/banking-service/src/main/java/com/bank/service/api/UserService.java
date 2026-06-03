@@ -1,12 +1,18 @@
 package com.bank.service.api;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+
+import com.bank.common.dto.UserDTO;
+import com.bank.common.dto.UserDTO.Profile;
+import com.bank.common.dto.UserDTO.Summary;
 import com.bank.domain.entity.User;
 import com.bank.domain.enums.UserRole;
 
@@ -38,4 +44,11 @@ public interface UserService {
 	public boolean existsByEmailOrPhone(String email, String phone);
 	boolean existsByEmailAndIdNot(String email, UUID excludeId);
 	public Optional<User> findByIdWithAccounts(UUID id);
+	public Page<Summary> findAll(Pageable of);
+	public Profile register(String firstName, String lastName, LocalDate dateOfBirth, String email, String password,
+			String phoneNumber);
+	public Profile getProfile(UUID userId);
+	public UserDTO updateUser(UUID targetId, String firstName, String lastName, String addressLine1, String addressLine2,
+			String city, String postalCode, String countryCode, UUID operatorId);
+	public void setEnabled(UUID userId, boolean enabled, UUID operatorId);
 }

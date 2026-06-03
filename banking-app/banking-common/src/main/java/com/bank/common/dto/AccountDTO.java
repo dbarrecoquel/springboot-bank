@@ -38,7 +38,9 @@ public record AccountDTO(
 		
 ) {
 	
-    /**
+    
+
+	/**
      * Vue résumée pour les listes (moins de champs).
      */
     public record Summary(
