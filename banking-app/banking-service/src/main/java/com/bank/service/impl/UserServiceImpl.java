@@ -315,8 +315,98 @@ public class UserServiceImpl implements UserService {
                  enabled ? "Activé" : "Désactivé", userId, operatorId);
     }
 
-	
-	
+	@Override
+	@Transactional
+	public void validateKyc(UUID userId, UUID operatorId) {
+		 User user =  userRepository.findById(userId).orElseThrow(() -> new BankingException(
+	                "Utilisateur introuvable : " + userId,
+	                "USER_NOT_FOUND", HttpStatus.NOT_FOUND));
+		 
+		 if (user.isKycVerified()) {
+	            throw new BankingException(
+	                    "Le KYC de cet utilisateur est déjà validé.",
+	                    "KYC_ALREADY_VERIFIED", HttpStatus.CONFLICT);
 
-	
+		 }
+		 
+		 user.verifyKyc();
+		 userRepository.validateKyc(userId,LocalDateTime.now());
+		 
+		 if (user.isEmailVerified()) {
+	            notificationService.sendEmailVerification(
+	                    userId, user.getEmail(),
+	                    "KYC_VALIDATED", user.getFullName()
+	                );
+
+		 }
+         auditLogRepository.save(AuditLog.success(
+                "USER_KYC_VALIDATED", "User",
+                userId.toString(), operatorId,
+                "operator=" + operatorId
+            ));
+     
+         log.info("[USER] KYC validé — id={} operator={}", userId, operatorId);
+
+	}
+    @Override
+    @Transactional
+    public void addRole(UUID userId, UserRole role, UUID operatorId) {
+    	User user =  userRepository.findById(userId).orElseThrow(() -> new BankingException(
+                "Utilisateur introuvable : " + userId,
+                "USER_NOT_FOUND", HttpStatus.NOT_FOUND));
+    	
+        if (user.hasRole(role)) {
+            throw new BankingException(
+                "L'utilisateur possède déjà le rôle " + role,
+                "ROLE_ALREADY_EXISTS", HttpStatus.CONFLICT);
+        }
+ 
+        user.addRole(role);
+        userRepository.save(user);
+        sessionCacheService.invalidateAllUserSessions(userId);
+        
+        auditLogRepository.save(AuditLog.success(
+            "USER_ROLE_ADDED", "User",
+            userId.toString(), operatorId,
+            "role=" + role + " operator=" + operatorId
+        ));
+ 
+        log.info("[USER] Rôle ajouté — id={} role={} operator={}", userId, role, operatorId);
+
+    }
+    @Override
+    @Transactional
+    public void removeRole(UUID userId, UserRole role, UUID operatorId) {
+    	User user =  userRepository.findById(userId).orElseThrow(() -> new BankingException(
+                "Utilisateur introuvable : " + userId,
+                "USER_NOT_FOUND", HttpStatus.NOT_FOUND));
+ 
+        if (!user.hasRole(role)) {
+            throw new BankingException(
+                "L'utilisateur ne possède pas le rôle " + role,
+                "ROLE_NOT_FOUND", HttpStatus.NOT_FOUND);
+        }
+ 
+        user.removeRole(role);
+        userRepository.save(user);
+ 
+        sessionCacheService.invalidateAllUserSessions(userId);
+ 
+        auditLogRepository.save(AuditLog.success(
+            "USER_ROLE_REMOVED", "User",
+            userId.toString(), operatorId,
+            "role=" + role + " operator=" + operatorId
+        ));
+ 
+        log.info("[USER] Rôle retiré — id={} role={} operator={}", userId, role, operatorId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<UserDTO.Summary> findPendingKyc(Pageable pageable) {
+        return userRepository
+            .findByKycVerifiedFalseAndEnabledTrueOrderByCreatedAtAsc(pageable)
+            .map(userMapper::toSummary);
+    }
+
 }

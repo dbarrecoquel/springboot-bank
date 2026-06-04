@@ -42,6 +42,7 @@ import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Notification;
 import com.bank.domain.entity.User;
 import com.bank.domain.enums.UserRole;
+import com.bank.infrastructure.cache.SessionCacheService;
 import com.bank.infrastructure.notification.EmailAdapter;
 import com.bank.infrastructure.persistence.AccountRepository;
 import com.bank.infrastructure.persistence.AuditLogRepository;
@@ -69,6 +70,10 @@ public class UserServiceTest {
 	private NotificationService notificationService;
 	@Mock
 	private EmailAdapter emailAdapter;
+	
+	@Mock
+	private SessionCacheService sessionCacheService;
+	
 	@InjectMocks
 	private UserServiceImpl userService;
 	
@@ -671,6 +676,46 @@ public class UserServiceTest {
         .should()
         .toDto(user);
 	}
+	@Test
+	void shouldEnabledUser() {
+		UUID operatorID = UUID.randomUUID();
+		user.setEnabled(true);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		given(userRepository.save(any(User.class))).willReturn(user);
+		
+		userService.setEnabled(userId,false, operatorID);
+		assertThat(user.isEnabled()).isFalse();
+		then(userRepository).should(times(1)).findById(userId);
+        then(userRepository).should(times(1)).save(user);
+        
+        then(sessionCacheService).should(times(1)).invalidateAllUserSessions(userId);
+        then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+	}
+	@Test
+	void setEnabled_toTrue_shouldEnableUserWithoutInvalidatingSessions() {
+        // Given (Arrange)
+        UUID userId = UUID.randomUUID();
+        UUID operatorId = UUID.randomUUID();
+        
+        user.setId(userId);
+        user.setEnabled(false);
+
+        given(userRepository.findById(userId)).willReturn(Optional.of(user));
+        given(userRepository.save(any(User.class))).willReturn(user);
+
+        // When (Act)
+        userService.setEnabled(userId, true, operatorId);
+
+        // Then (Assert)
+        assertThat(user.isEnabled()).isTrue();
+        
+        then(userRepository).should(times(1)).findById(userId);
+        then(userRepository).should(times(1)).save(user);
+        
+        then(sessionCacheService).should(never()).invalidateAllUserSessions(any());
+        
+        then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+    }
 	private UserDTO.Summary expectedUserDTOSummary(User user){
 		
 		return new UserDTO.Summary(user.getId(), 
@@ -681,6 +726,135 @@ public class UserServiceTest {
 				user.isKycVerified(),
 				user.getRoles(),
 				user.getCreatedAt());
+		
+	}
+	@Test
+	void shouldKycVerified() {
+		UUID operatorID = UUID.randomUUID();
+		user.setEnabled(true);
+		user.setKycVerified(false);
+		user.setEmailVerified(false);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		
+		userService.validateKyc(userId, operatorID);
+		assertThat(user.isKycVerified()).isTrue();
+		then(userRepository).should(times(1)).findById(userId);
+		then(userRepository).should(times(1)).validateKyc(eq(userId), any(LocalDateTime.class));
+        then(userRepository).should(never()).save(user);   
+        then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+	}
+	@Test
+	void shouldKycAlreadyVerified() {
+		UUID operatorID = UUID.randomUUID();
+		user.setEnabled(true);
+		user.setKycVerified(true);
+		user.setEmailVerified(false);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		assertThatThrownBy(() -> 
+	 	userService.validateKyc(userId,operatorID)
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("KYC");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("KYC_ALREADY_VERIFIED");
+		 });
+		then(userRepository).should(times(1)).findById(userId);
+		then(userRepository).should(never()).validateKyc(eq(userId), any(LocalDateTime.class));
+        then(userRepository).should(never()).save(user);   
+        then(auditLogRepository).should(never()).save(any(AuditLog.class));
+	}
+	@Test
+	void addRoleSuccess() {
+		UserRole newRole = UserRole.ADMIN;
+		UUID operatorID = UUID.randomUUID();
+		user.getRoles().add(UserRole.CUSTOMER);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		given(userRepository.save(any(User.class))).willReturn(user);
+		
+		userService.addRole(userId, newRole, operatorID);
+		assertThat(user.hasRole(newRole)).isTrue();
+		
+		then(userRepository).should(times(1)).findById(userId);
+		then(userRepository).should(times(1)).save(user);
+		then(sessionCacheService).should(times(1)).invalidateAllUserSessions(userId);
+        then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+	}
+	@Test
+	void addRoleFailled() {
+		UserRole newRole = UserRole.CUSTOMER;
+		UUID operatorID = UUID.randomUUID();
+		user.getRoles().add(UserRole.CUSTOMER);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		
+		
+		assertThatThrownBy(() -> 
+			userService.addRole(userId, newRole, operatorID)
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("utilisateur");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ROLE_ALREADY_EXISTS");
+		 });
+		
+		then(userRepository).should(times(1)).findById(userId);
+		then(userRepository).should(never()).save(user);
+		then(sessionCacheService).should(never()).invalidateAllUserSessions(userId);
+        then(auditLogRepository).should(never()).save(any(AuditLog.class));
+	}
+	@Test
+	void removeRoleSuccess() {
+		UserRole oldRole = UserRole.ADMIN;
+		UUID operatorID = UUID.randomUUID();
+		user.getRoles().add(UserRole.CUSTOMER);
+		user.getRoles().add(UserRole.ADMIN);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		given(userRepository.save(any(User.class))).willReturn(user);
+		
+		userService.removeRole(userId, oldRole, operatorID);
+		assertThat(user.hasRole(oldRole)).isFalse();
+		
+		then(userRepository).should(times(1)).findById(userId);
+		then(userRepository).should(times(1)).save(user);
+		then(sessionCacheService).should(times(1)).invalidateAllUserSessions(userId);
+        then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+	}
+	@Test
+	void removeRoleFailled() {
+		UserRole oldRole = UserRole.ADMIN;
+		UUID operatorID = UUID.randomUUID();
+		user.getRoles().add(UserRole.CUSTOMER);
+		given(userRepository.findById(userId)).willReturn(Optional.of(user));
+		
+		
+		assertThatThrownBy(() -> 
+			userService.removeRole(userId, oldRole, operatorID)
+		).isInstanceOf(BankingException.class) .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("utilisateur");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ROLE_NOT_FOUND");
+		 });
+		
+		then(userRepository).should(times(1)).findById(userId);
+		then(userRepository).should(never()).save(user);
+		then(sessionCacheService).should(never()).invalidateAllUserSessions(userId);
+        then(auditLogRepository).should(never()).save(any(AuditLog.class));
+	}
+	@Test
+	void findPendingKyc_success() {
+		Pageable pageable = PageRequest.of(0, 10);
+		List<User> userList = List.of(user);
+		Page<User> userPage = new PageImpl<>(userList,pageable,userList.size());
+		UserDTO.Summary expected = expectedUserDTOSummary(user);
+		
+		given(userRepository.findByKycVerifiedFalseAndEnabledTrueOrderByCreatedAtAsc(pageable)).willReturn(userPage);
+		given(userMapper.toSummary(any(User.class))).willReturn(expected);
+		
+		Page<UserDTO.Summary> page = userService.findPendingKyc(pageable);
+		assertThat(page).isNotNull();
+		assertThat(page).hasSize(1);
+		assertThat(page.getContent().get(0)).isEqualTo(expected);
+		then(userRepository).should(times(1))
+        .findByKycVerifiedFalseAndEnabledTrueOrderByCreatedAtAsc(pageable);
+		
+		
 		
 	}
 	private UserDTO.Profile expectedUserDTOProfile(User user){

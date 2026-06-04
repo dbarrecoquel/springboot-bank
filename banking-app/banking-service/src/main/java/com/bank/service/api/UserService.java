@@ -51,4 +51,8 @@ public interface UserService {
 	public UserDTO updateUser(UUID targetId, String firstName, String lastName, String addressLine1, String addressLine2,
 			String city, String postalCode, String countryCode, UUID operatorId);
 	public void setEnabled(UUID userId, boolean enabled, UUID operatorId);
+	public void validateKyc(UUID userId, UUID operatorId);
+	public void addRole(UUID userId, UserRole role, UUID operatorId);
+	public void removeRole(UUID userId, UserRole role, UUID operatorId);
+	public Page<Summary> findPendingKyc(Pageable pageable);
 }
