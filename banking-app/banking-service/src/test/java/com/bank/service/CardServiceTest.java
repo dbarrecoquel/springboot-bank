@@ -1,5 +1,7 @@
 package com.bank.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -8,18 +10,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -27,11 +33,21 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import com.bank.common.dto.CardDTO;
+import com.bank.common.exception.BankingException;
 import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.common.mapper.CardMapper;
+import com.bank.domain.entity.Account;
 import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Card;
+import com.bank.domain.entity.User;
+import com.bank.domain.enums.AccountStatus;
 import com.bank.domain.enums.CardStatus;
+import com.bank.domain.enums.CurrencyCode;
+import com.bank.domain.enums.UserRole;
+import com.bank.infrastructure.persistence.AccountRepository;
 import com.bank.infrastructure.persistence.AuditLogRepository;
 import com.bank.infrastructure.persistence.CardRepository;
 import com.bank.service.impl.CardServiceImpl;
@@ -45,6 +61,12 @@ public class CardServiceTest {
 	@Mock
 	private AuditLogRepository auditLogRepository;
 	
+	@Mock
+	private AccountRepository accountRepository;
+	
+	@Mock
+	private CardMapper cardMapper;
+	
 	@InjectMocks
 	private CardServiceImpl cardService;
 	
@@ -52,7 +74,8 @@ public class CardServiceTest {
 	private UUID cardId;
 	private UUID ownerId;
 	private UUID accountId;
-	
+	private User user;
+	private Account account;
 	
 	
 	
@@ -63,11 +86,23 @@ public class CardServiceTest {
 		cardId = UUID.randomUUID();
 		ownerId = UUID.randomUUID();
 		accountId = UUID.randomUUID();
+		user = new User();
 		
 		card = new Card();
+		account = new Account();
+		
 		card.setId(cardId);
 		card.setStatus(CardStatus.ACTIVE);
-	
+		user.setId(ownerId);
+		account.setId(accountId);
+		account.setOwner(user);
+		card.setOwner(user);
+		card.setAccount(account);
+		ReflectionTestUtils.setField(
+		        cardService, 
+		        "encryptionKeyBase64", 
+		        "MDEyMzQ1Njc4OUFCQ0RFRmowMTIzNDU2Nzg5QUJDREU="
+		    );
 	}
 	
 	@Test
@@ -648,6 +683,177 @@ public class CardServiceTest {
 		
 		verify(cardRepository).findByPinBlockedTrueOrderByUpdatedAtDesc(pageable);
 		
+	}
+	@Test
+	void shouldFindByOWner_success() {
+		
+		CardDTO expectedDTO = buildCardDTO(cardId, accountId);
+		
+		given(cardRepository.findByOwnerIdOrderByCreatedAtDesc(ownerId)).willReturn(List.of(card));
+		given(cardMapper.toDto(card)).willReturn(expectedDTO);
+		
+		List<CardDTO> result = cardService.findByOwner(ownerId);
+		
+		assertThat(result).hasSize(1);
+		assertThat(result.get(0)).isEqualTo(expectedDTO);
+		
+		then(cardRepository).should(times(1)).findByOwnerIdOrderByCreatedAtDesc(ownerId);
+		then(cardMapper).should(times(1)).toDto(card);
+		
+	}
+	@Test
+	void shouldFindByOWner_empty() {
+		
+		
+		given(cardRepository.findByOwnerIdOrderByCreatedAtDesc(ownerId)).willReturn(List.of());
+		
+		List<CardDTO> result = cardService.findByOwner(ownerId);
+		
+		assertThat(result).hasSize(0);
+		
+		then(cardRepository).should(times(1)).findByOwnerIdOrderByCreatedAtDesc(ownerId);
+		then(cardMapper).should(never()).toDto(card);
+		
+	}
+	@Test
+	void shouldFindById_success() {
+		
+		CardDTO expectedDTO = buildCardDTO(cardId, accountId);
+		Set<UserRole> roles = Set.of(UserRole.ADMIN);
+		given(cardRepository.findByIdWithOwnerAndAccount(cardId)).willReturn(Optional.of(card));
+		given(cardMapper.toDto(card)).willReturn(expectedDTO);
+		
+		CardDTO result = cardService.findById(cardId, UUID.randomUUID(), roles);
+		
+		assertThat(result).isNotNull();
+		
+		then(cardRepository).should(times(1)).findByIdWithOwnerAndAccount(cardId);
+		then(cardMapper).should(times(1)).toDto(card);
+		
+	}
+	@Test
+	void shouldFindById_notFound() {
+		
+		Set<UserRole> roles = Set.of(UserRole.ADMIN);
+		given(cardRepository.findByIdWithOwnerAndAccount(cardId)).willReturn(Optional.empty());
+		
+		
+		assertThatThrownBy(() -> 
+		 cardService.findById(cardId, UUID.randomUUID(), roles)
+		).isInstanceOf(BankingException.class)
+		 .satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Carte introuvable");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("CARD_NOT_FOUND");
+		 });
+	
+		
+		then(cardRepository).should(times(1)).findByIdWithOwnerAndAccount(cardId);
+		then(cardMapper).should(never()).toDto(card);
+		
+	}
+	@Test
+	void shouldFindById_notOperator() {
+		
+		given(cardRepository.findByIdWithOwnerAndAccount(cardId)).willReturn(Optional.of(card));
+		
+		
+		assertThatThrownBy(() -> 
+		 cardService.findById(cardId, UUID.randomUUID(), null)
+		).isInstanceOf(UnauthorizedOperationException.class);
+		 
+	
+		
+		then(cardRepository).should(times(1)).findByIdWithOwnerAndAccount(cardId);
+		then(cardMapper).should(never()).toDto(card);
+		
+	}
+	@Test
+	void shouldIssueThat_success() {
+
+		account.setStatus(AccountStatus.ACTIVE);
+		CardDTO expectedDTO = buildCardDTO(cardId, accountId);
+		given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.of(account));
+		given(cardMapper.toDto(any(Card.class))).willReturn(expectedDTO);
+		given(cardRepository.save(any(Card.class))).willAnswer(invocation -> invocation.getArgument(0));
+		
+		CardDTO result = cardService.issueCard(accountId, ownerId,"test", false, CurrencyCode.EUR);
+		
+		assertThat(result).isNotNull();
+		assertThat(result.id()).isEqualTo(cardId);
+		then(accountRepository).should(times(1)).findByIdWithOwner(accountId);
+		then(cardRepository).should(times(1)).save(any(Card.class));
+		then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+		then(cardMapper).should(times(1)).toDto(any(Card.class));
+	}
+	@Test
+	void shouldIssueThat_statusInactive() {
+
+		account.setStatus(AccountStatus.BLOCKED);
+		given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.of(account));
+		
+		assertThatThrownBy(() ->  cardService.issueCard(accountId, ownerId,"test", false, CurrencyCode.EUR))
+		.isInstanceOf(BankingException.class).satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("compte non actif");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_NOT_ACTIVE");
+		 });
+		
+		then(accountRepository).should(times(1)).findByIdWithOwner(accountId);
+		then(cardRepository).should(never()).save(any(Card.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(cardMapper).should(never()).toDto(any(Card.class));
+	}
+	@Test
+	void shouldIssueThat_unknowUser() {
+
+		given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.empty());
+		
+		assertThatThrownBy(() ->  cardService.issueCard(accountId, ownerId,"test", false, CurrencyCode.EUR))
+		.isInstanceOf(BankingException.class).satisfies(ex -> {
+			 BankingException bankingEx = (BankingException) ex;
+			 assertThat(bankingEx.getMessage()).contains("Compte introuvable");
+			 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+		 });
+		
+		then(accountRepository).should(times(1)).findByIdWithOwner(accountId);
+		then(cardRepository).should(never()).save(any(Card.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(cardMapper).should(never()).toDto(any(Card.class));
+	}
+	@Test
+	void shouldIssueThat_invalidRequester() {
+
+		given(accountRepository.findByIdWithOwner(accountId)).willReturn(Optional.of(account));
+		
+		assertThatThrownBy(() ->  cardService.issueCard(accountId, UUID.randomUUID(),"test", false, CurrencyCode.EUR))
+		.isInstanceOf(UnauthorizedOperationException.class);
+		then(accountRepository).should(times(1)).findByIdWithOwner(accountId);
+		then(cardRepository).should(never()).save(any(Card.class));
+		then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		then(cardMapper).should(never()).toDto(any(Card.class));
+	}
+	private CardDTO buildCardDTO(UUID cardId, UUID accountId) {
+	    return new CardDTO(
+	        cardId,
+	        "4532XXXXXXXX1234",                       // panMasked
+	        "ALEXIS DUPONT",                          // cardholderName
+	        "12/29",                                  // expiryDate (MM/YY)
+	        "ACTIVE",                                 // status
+	        "Carte active",                           // statusLabel
+	        false,                                    // virtual (carte physique)
+	        true,                                     // contactlessEnabled
+	        true,                                     // onlinePaymentsEnabled
+	        false,                                    // internationalPaymentsEnabled
+	        false,                                    // pinBlocked
+	        new java.math.BigDecimal("1500.00"),      // dailyPaymentLimit
+	        new java.math.BigDecimal("500.00"),       // dailyWithdrawalLimit
+	        CurrencyCode.EUR,                         // currency (Enum à adapter selon ton projet)
+	        accountId,                                // accountId
+	        "FR7630006000012345678901234",            // accountIban
+	        java.time.LocalDateTime.now().minusMonths(3), // activatedAt
+	        java.time.LocalDateTime.now().minusMonths(3)  // createdAt
+	    );
 	}
 	
 }

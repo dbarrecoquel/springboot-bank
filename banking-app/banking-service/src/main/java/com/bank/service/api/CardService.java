@@ -1,15 +1,20 @@
 package com.bank.service.api;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import com.bank.common.dto.CardDTO;
 import com.bank.domain.entity.Card;
 import com.bank.domain.enums.CardStatus;
+import com.bank.domain.enums.CurrencyCode;
+import com.bank.domain.enums.UserRole;
 
 public interface CardService {
 
@@ -41,4 +46,16 @@ public interface CardService {
 	public void resetPinAttempts(UUID id);
 	public List<Object[]> countByStatus();
 	public Page<Card> findByPinBlockedTrueOrderByUpdatedAtDesc(Pageable pageable);
+	public List<CardDTO> findByOwner(UUID ownerID);
+	public CardDTO findById(UUID cardId, UUID requesterId, Set<UserRole> roles);
+	public CardDTO issueCard(UUID accountId, UUID requesterId, String cardholderName, boolean virtual, CurrencyCode currency);
+	public CardDTO activate(UUID cardId, UUID requesterId, String confirmationCode);
+	public CardDTO block(UUID cardId, UUID requesterId, Set<UserRole> roles, String reason);
+	public CardDTO unblock(UUID cardId, UUID operatorId);
+	public void cancel(UUID cardId, UUID requesterId, Set<UserRole> roles, String reason);
+	public CardDTO updateLimits(UUID cardId, UUID requesterId, Set<UserRole> roles, BigDecimal dailyPaymentLimit,
+			BigDecimal dailyWithdrawalLimit);
+	public CardDTO updateSettings(UUID cardId, UUID requesterId, Set<UserRole> roles, Boolean contactlessEnabled,
+			Boolean onlinePaymentsEnabled, Boolean internationalPaymentsEnabled);
+	public void resetPin(UUID cardId, UUID requesterId, Set<UserRole> roles, String otpCode);
 }
