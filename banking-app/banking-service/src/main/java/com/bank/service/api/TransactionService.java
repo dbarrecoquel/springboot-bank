@@ -4,14 +4,19 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+
+import com.bank.common.dto.TransactionDTO;
+import com.bank.common.dto.TransactionDTO.Summary;
 import com.bank.domain.entity.Transaction;
 import com.bank.domain.enums.CurrencyCode;
 import com.bank.domain.enums.TransactionStatus;
 import com.bank.domain.enums.TransactionType;
+import com.bank.domain.enums.UserRole;
 
 public interface TransactionService {
 
@@ -117,6 +122,10 @@ public interface TransactionService {
 	public Transaction applyFee(UUID accountId, BigDecimal amount, CurrencyCode currency, String feeType);
 	public Transaction currencyExchange(UUID sourceAccountId, UUID destinationAccountId, UUID requesterId, BigDecimal amount,
 			CurrencyCode fromCurrency, CurrencyCode toCurrency, BigDecimal exchangeRate);
+	public TransactionDTO findById(UUID id, UUID userId, Set<UserRole> roles);
+	public Page<Summary> findAll(TransactionStatus status, TransactionType type, String from, String to, Pageable pageable);
+	public TransactionDTO confirm(UUID transactionId, UUID operatorId);
+	public TransactionDTO blockTransaction(UUID transactionId, String reason, UUID operatorId);
 
 		
 }

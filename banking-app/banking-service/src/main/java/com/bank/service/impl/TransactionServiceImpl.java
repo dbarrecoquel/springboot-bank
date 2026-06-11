@@ -2,17 +2,24 @@ package com.bank.service.impl;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bank.common.dto.TransactionDTO;
+import com.bank.common.exception.BankingException;
 import com.bank.common.exception.InsufficientFundsException;
 import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.common.mapper.TransactionMapper;
 import com.bank.domain.entity.Account;
 import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Transaction;
@@ -20,6 +27,7 @@ import com.bank.domain.enums.AccountStatus;
 import com.bank.domain.enums.CurrencyCode;
 import com.bank.domain.enums.TransactionStatus;
 import com.bank.domain.enums.TransactionType;
+import com.bank.domain.enums.UserRole;
 import com.bank.domain.event.TransactionCreatedEvent;
 import com.bank.infrastructure.messaging.TransactionEventProducer;
 import com.bank.infrastructure.persistence.AccountRepository;
@@ -42,6 +50,7 @@ public class TransactionServiceImpl implements TransactionService {
 	private final AccountRepository accountRepository;
 	private final FraudDetectionService fraudDetectionService;
 	private final TransactionEventProducer eventProducer;
+	private final TransactionMapper transactionMapper;
 	@Override
 	public List<Transaction> getAllTransactions() {
 		return transactionRepository.findAll();
@@ -783,6 +792,16 @@ public class TransactionServiceImpl implements TransactionService {
                 account.availableBalance(), account.getCurrency().name());
         }
     }
+    private LocalDateTime parseDateTime(String value, String field) {
+        try {
+            return LocalDateTime.parse(value);
+        } catch (DateTimeParseException ex) {
+            throw new BankingException(
+                "Format de date invalide pour '" + field
+                + "' — attendu ISO 8601 (yyyy-MM-ddTHH:mm:ss)",
+                "INVALID_DATE_FORMAT", HttpStatus.BAD_REQUEST);
+        }
+    }
 
     private String generateEndToEndId() {
         return "E2E-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
@@ -844,5 +863,152 @@ public class TransactionServiceImpl implements TransactionService {
 		auditLogRepository.save(AuditLog.success(
 				action, "Transaction", tx.getId().toString(), actorId, detail));
 	}
+	private TransactionDTO toTransactionDto(Transaction tx, boolean showFraudScore) {
+	    return new TransactionDTO(
+	        tx.getId(),
+	        tx.getReference(),
+	        tx.getType(),
+	        tx.getType().getLabel(),
+	        tx.getStatus(),
+	        tx.getStatus().getLabel(),
+	        tx.getAmount(),
+	        tx.getCurrency(),
+	        tx.getAmountEur(),
+	        tx.getExchangeRate(),
+	        tx.getFees(),
+	        tx.totalAmount(),
+	        tx.getAccount() != null ? tx.getAccount().getId() : null,
+	        tx.getCounterpartIban(),
+	        tx.getCounterpartName(),
+	        tx.getCounterpartBic(),
+	        tx.getLabel(),
+	        tx.getRejectionReason(),
+	        tx.getEndToEndId(),
+	        tx.getMandateId(),
+	        showFraudScore ? tx.getFraudScore() : null,
+	        tx.getCreatedAt(),
+	        tx.getUpdatedAt(),
+	        tx.getSettledAt()
+	    );
+	}
+
+	@Override
+	public TransactionDTO findById(UUID id, UUID userId, Set<UserRole> roles) {
+		Transaction tx = transactionRepository.findById(id).orElseThrow(() -> new BankingException(
+	            "Transaction introuvable : " + id,
+	            "TRANSACTION_NOT_FOUND", HttpStatus.NOT_FOUND));
+		
+		boolean isOperator = roles.contains(UserRole.TELLER)
+		        || roles.contains(UserRole.MANAGER)
+		        || roles.contains(UserRole.COMPLIANCE)
+		        || roles.contains(UserRole.ADMIN);
+		 
+	    if (!isOperator) {
+	        boolean isOwner = accountRepository
+	            .existsByIdAndOwnerId(tx.getAccount().getId(), userId);
+	        if (!isOwner) {
+	            throw new BankingException(
+	                "Accès refusé à cette transaction",
+	                "ACCESS_DENIED", HttpStatus.FORBIDDEN);
+	        }
+	    }
+	    boolean showFraudScore = roles.contains(UserRole.ADMIN) || roles.contains(UserRole.COMPLIANCE);
+	    
+	    return toTransactionDto(tx, showFraudScore);
+	}
+	@Override
+	public Page<TransactionDTO.Summary> findAll(TransactionStatus status, TransactionType type, String from, String to, Pageable pageable){
+	
+		Specification<Transaction> spec = Specification.allOf();
+		if (status != null)
+			spec = spec.and((root ,q, cb) -> cb.equal(root.get("status"), status));
+		if (type != null)
+			spec = spec.and((root, q, cb) -> cb.equal(root.get("type"),type));
+		
+		if (from != null)
+		{
+			LocalDateTime dtFrom = parseDateTime(from, "from");
+			spec = spec.and((root, q, cb) ->cb.greaterThanOrEqualTo(root.get("createdAt"), dtFrom));
+		}
+		if (to != null)
+		{
+			LocalDateTime dtTo = parseDateTime(to, "to");
+			spec = spec.and((root, q, cb) ->cb.lessThanOrEqualTo(root.get("createdAt"), dtTo));
+		}
+		
+		return transactionRepository.findAll(spec, pageable).map(transactionMapper::toSummary);
+	}
+	@Override
+	@Transactional
+	public TransactionDTO confirm(UUID transactionId, UUID operatorId) {
+		
+	    Transaction tx = transactionRepository.findById(transactionId)
+	            .orElseThrow(() -> new BankingException(
+	                "Transaction introuvable : " + transactionId,
+	                "TRANSACTION_NOT_FOUND", HttpStatus.NOT_FOUND));
+	     
+	    if (!tx.getStatus().canTransitionTo(TransactionStatus.CONFIRMED)) {
+	        throw UnauthorizedOperationException.invalidTransition(
+	            "Transaction", transactionId,
+	            tx.getStatus().name(), "CONFIRMED");
+	    }
+	    transactionRepository.updateStatus(
+	            transactionId, TransactionStatus.CONFIRMED, LocalDateTime.now());
+	     tx.setStatus(TransactionStatus.CONFIRMED);
+	     
+	        auditLogRepository.save(AuditLog.success(
+	            "TRANSACTION_CONFIRMED", "Transaction",
+	            transactionId.toString(), operatorId,
+	            "ref=" + tx.getReference()));
+	     
+	        log.info("[TX] Confirmée — ref={} operator={}", tx.getReference(), operatorId);
+	     
+	        return toTransactionDto(tx, true);
+
+	}
+	@Override
+	@Transactional
+	public TransactionDTO blockTransaction(UUID transactionId,
+	                                        String reason,
+	                                        UUID operatorId) {
+	 
+	    Transaction tx = transactionRepository.findById(transactionId)
+	        .orElseThrow(() -> new BankingException(
+	            "Transaction introuvable : " + transactionId,
+	            "TRANSACTION_NOT_FOUND", HttpStatus.NOT_FOUND));
+	 
+	    if (!tx.getStatus().canTransitionTo(TransactionStatus.BLOCKED)) {
+	        throw UnauthorizedOperationException.invalidTransition(
+	            "Transaction", transactionId,
+	            tx.getStatus().name(), "BLOCKED");
+	    }
+	 
+	    // Libérer la provision sur le compte si les fonds étaient réservés
+	    if (tx.getStatus().holdsFunds()) {
+	        accountRepository.findByIdWithLock(tx.getAccount().getId())
+	            .ifPresent(account -> {
+	                account.credit(tx.getAmount());
+	                accountRepository.save(account);
+	                log.info("[TX] Provision libérée — account={} amount={}",
+	                         account.getId(), tx.getAmount());
+	            });
+	    }
+	 
+	    transactionRepository.updateStatus(
+	        transactionId, TransactionStatus.BLOCKED, LocalDateTime.now());
+	    tx.setStatus(TransactionStatus.BLOCKED);
+	    tx.setRejectionReason(reason);
+	 
+	    auditLogRepository.save(AuditLog.failure(
+	        "TRANSACTION_BLOCKED", "Transaction",
+	        transactionId.toString(), operatorId,
+	        "reason=" + reason + " ref=" + tx.getReference()));
+	 
+	    log.warn("[TX] Bloquée — ref={} reason={} operator={}",
+	             tx.getReference(), reason, operatorId);
+	 
+	    return toTransactionDto(tx, true);
+	}
 
 }
+

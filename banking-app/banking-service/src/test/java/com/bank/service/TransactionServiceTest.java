@@ -3,7 +3,9 @@ package com.bank.service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -14,18 +16,30 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.http.HttpStatus;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
+import com.bank.common.dto.TransactionDTO;
+import com.bank.common.exception.BankingException;
 import com.bank.common.exception.InsufficientFundsException;
 import com.bank.common.exception.UnauthorizedOperationException;
+import com.bank.common.mapper.TransactionMapper;
 import com.bank.domain.entity.Account;
+import com.bank.domain.entity.AuditLog;
 import com.bank.domain.entity.Card;
 import com.bank.domain.entity.Transaction;
 import com.bank.domain.entity.User;
@@ -34,6 +48,7 @@ import com.bank.domain.enums.AccountType;
 import com.bank.domain.enums.CurrencyCode;
 import com.bank.domain.enums.TransactionStatus;
 import com.bank.domain.enums.TransactionType;
+import com.bank.domain.enums.UserRole;
 import com.bank.domain.event.TransactionCreatedEvent;
 import com.bank.infrastructure.messaging.TransactionEventProducer;
 import com.bank.infrastructure.persistence.AccountRepository;
@@ -55,7 +70,8 @@ public class TransactionServiceTest {
 	private TransactionEventProducer eventProducer;
 	@Mock
 	private FraudDetectionService fraudDetectionService;
-	
+	@Mock
+	private TransactionMapper transactionMapper;
 	@InjectMocks
 	private TransactionServiceImpl transactionService;
 	
@@ -883,6 +899,191 @@ public class TransactionServiceTest {
 
 			then(transactionRepository).should(never()).save(any());
 			then(eventProducer).should(never()).publishTransactionCreated(any());
+		}
+	}
+	@Nested
+	@DisplayName("Find transaction tests")
+	class FindTransactionTest{
+		private Transaction originalTx;
+		
+		@BeforeEach
+		void setUp() {
+			
+			originalTx = buildTransaction(aliceAccount, TransactionType.DIRECT_DEBIT, TransactionStatus.SETTLED, BigDecimal.valueOf(100));
+			originalTx.setReference("TXN-ORIG-123");
+			originalTx.setCreatedAt(LocalDateTime.now());
+		}
+		@Test
+		void findByIdSuccess() {
+			UUID originalTxID = UUID.randomUUID();
+			UUID accountId = aliceAccount.getId();
+			UUID userId = alice.getId();
+			Set<UserRole> roles = Set.of(UserRole.CUSTOMER);
+			given(transactionRepository.findById(originalTxID)).willReturn(Optional.of(originalTx));
+			given(accountRepository.existsByIdAndOwnerId(accountId, userId)).willReturn(true);
+			TransactionDTO result = transactionService.findById(originalTxID, userId, roles);
+			assertThat(result).isNotNull();
+	        assertThat(result.id()).isEqualTo(originalTx.getId());
+	        assertThat(result.reference()).isEqualTo("TXN-ORIG-123");
+	        assertThat(result.accountId()).isEqualTo(accountId);
+	        assertThat(result.fraudScore()).isNull();
+	        then(transactionRepository).should(times(1)).findById(originalTxID);
+	        then(accountRepository).should(times(1)).existsByIdAndOwnerId(accountId, userId);
+		}
+		@Test
+		void findByIdSuccessOperator() {
+			UUID originalTxID = UUID.randomUUID();
+			UUID accountId = aliceAccount.getId();
+			UUID userId = alice.getId();
+			Set<UserRole> roles = Set.of(UserRole.ADMIN);
+			originalTx.setFraudScore(BigDecimal.valueOf(0.4));
+			given(transactionRepository.findById(originalTxID)).willReturn(Optional.of(originalTx));
+			TransactionDTO result = transactionService.findById(originalTxID, userId, roles);
+			assertThat(result).isNotNull();
+	        assertThat(result.id()).isEqualTo(originalTx.getId());
+	        assertThat(result.reference()).isEqualTo("TXN-ORIG-123");
+	        assertThat(result.accountId()).isEqualTo(accountId);
+	        assertThat(result.fraudScore()).isNotNull();
+	        then(transactionRepository).should(times(1)).findById(originalTxID);
+		}
+		@Test
+		void findByIdError() {
+			UUID originalTxID = UUID.randomUUID();
+			UUID accountId = aliceAccount.getId();
+			UUID userId = alice.getId();
+			Set<UserRole> roles = Set.of(UserRole.CUSTOMER);
+			given(transactionRepository.findById(originalTxID)).willReturn(Optional.of(originalTx));
+			given(accountRepository.existsByIdAndOwnerId(accountId, userId)).willReturn(false);
+			assertThatThrownBy(() ->transactionService.findById(originalTxID, userId, roles))
+			.isInstanceOf(BankingException.class).satisfies(ex -> {
+				 BankingException bankingEx = (BankingException) ex;
+				 assertThat(bankingEx.getMessage()).contains("Accès refusé à cette transaction");
+				 assertThat(bankingEx.getErrorCode()).isEqualTo("ACCESS_DENIED");
+			 });
+	        then(transactionRepository).should(times(1)).findById(originalTxID);
+	        then(accountRepository).should(times(1)).existsByIdAndOwnerId(accountId, userId);
+		}
+		@Test
+		void findAllWithAllFilter() {
+			
+			TransactionStatus statusFilter = TransactionStatus.SETTLED;
+			TransactionType typeFilter = TransactionType.DIRECT_DEBIT;
+			String fromStr = "2026-01-01T00:00:00";
+	        String toStr = "2026-01-02T23:59:59";
+	        
+	        Pageable pageable = PageRequest.of(0, 20);
+	        List<Transaction> transactions = List.of(originalTx);
+	        Page<Transaction> transactionPage = new PageImpl<>(transactions, pageable, transactions.size());
+	        TransactionDTO.Summary mockSummary = mock(TransactionDTO.Summary.class);
+	        given(transactionRepository.findAll(any(Specification.class), eq(pageable))).willReturn(transactionPage);
+	        given(transactionMapper.toSummary(any(Transaction.class))).willReturn(mockSummary);
+	        Page<TransactionDTO.Summary> result = transactionService.findAll(
+	                statusFilter, typeFilter, fromStr, toStr, pageable
+	            );
+
+            assertThat(result).isNotNull();
+            assertThat(result.getContent()).hasSize(1);
+            assertThat(result.getContent().get(0)).isEqualTo(mockSummary);
+            then(transactionRepository).should(times(1)).findAll(any(Specification.class), eq(pageable));
+            then(transactionMapper).should(times(1)).toSummary(any(Transaction.class));
+            
+		}
+		@Test
+	    void findAll_invalidDateFormat_shouldThrowException() {
+	        // Given
+	        String invalidFrom = "date-invalide-format";
+	        Pageable pageable = PageRequest.of(0, 10);
+
+	        assertThatThrownBy(() -> transactionService.findAll(null, null, invalidFrom, null, pageable))
+	            .isInstanceOf(BankingException.class); 
+
+	        then(transactionRepository).shouldHaveNoInteractions();
+	        then(transactionMapper).should(never()).toSummary(any(Transaction.class));
+	    }
+	}
+	@Nested
+	@DisplayName("Confirm transaction")
+	class ConfirmTransactionTests {
+		
+		private Transaction originalTx;
+		
+		@BeforeEach
+		void setUp() {
+			
+			originalTx = buildTransaction(aliceAccount, TransactionType.SEPA_TRANSFER, TransactionStatus.FRAUD_SUSPECT, BigDecimal.valueOf(1000));
+			originalTx.setReference("TXN-ORIG-123");
+			originalTx.setCreatedAt(LocalDateTime.now());
+		}
+		@Test
+		void shouldConfirmSuccess() {
+			UUID originalTxID = UUID.randomUUID();
+			UUID operatorId = UUID.randomUUID();
+			given(transactionRepository.findById(originalTxID)).willReturn(Optional.of(originalTx));
+			given(transactionRepository.updateStatus(eq(originalTxID), eq(TransactionStatus.CONFIRMED), any(LocalDateTime.class))).willReturn(1);
+			
+			TransactionDTO tx = transactionService.confirm(originalTxID, operatorId);
+			
+			assertThat(tx).isNotNull();
+			assertThat(tx.status()).isEqualTo(TransactionStatus.CONFIRMED);
+			
+			then(transactionRepository).should(times(1)).findById(originalTxID);
+			then(transactionRepository).should(times(1)).updateStatus(eq(originalTxID), eq(TransactionStatus.CONFIRMED), any(LocalDateTime.class));
+			then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
+			
+		}
+		@Test
+		void shouldntCanTransitionTo() {
+			
+			originalTx.setStatus(TransactionStatus.PENDING);
+			UUID originalTxID = UUID.randomUUID();
+			UUID operatorId = UUID.randomUUID();
+			
+			given(transactionRepository.findById(originalTxID)).willReturn(Optional.of(originalTx));
+			assertThatThrownBy(() -> transactionService.confirm(originalTxID,operatorId))
+			.isInstanceOf(UnauthorizedOperationException.class);
+			
+			then(transactionRepository).should(times(1)).findById(originalTxID);
+			then(transactionRepository).should(never()).updateStatus(eq(originalTxID), eq(TransactionStatus.CONFIRMED), any(LocalDateTime.class));
+			then(auditLogRepository).should(never()).save(any(AuditLog.class));
+		}
+		
+	}
+	@Nested
+	class BlockTransactionTests{
+		private Transaction originalTx;
+		
+		@BeforeEach
+		void setUp() {
+			
+			originalTx = buildTransaction(aliceAccount, TransactionType.SEPA_TRANSFER, TransactionStatus.PENDING, BigDecimal.valueOf(1000));
+			originalTx.setReference("TXN-ORIG-123");
+			originalTx.setCreatedAt(LocalDateTime.now());
+		}
+		@Test
+		void blocktransaction_withfundsheld() {
+			
+			UUID transactionId = UUID.randomUUID();
+			UUID operatorId  = UUID.randomUUID();
+			String blockReason = "Suspicion de fraude avérée";
+			originalTx.setStatus(TransactionStatus.FRAUD_SUSPECT);
+			originalTx.setAmount(BigDecimal.valueOf(150));
+			UUID accountId = originalTx.getAccount().getId();
+			
+			given(transactionRepository.findById(transactionId)).willReturn(Optional.of(originalTx));
+			given(accountRepository.findByIdWithLock(accountId)).willReturn(Optional.of(aliceAccount));
+			given(transactionRepository.updateStatus(eq(transactionId), eq(TransactionStatus.BLOCKED), any(LocalDateTime.class))).willReturn(1);
+			given(accountRepository.save(any(Account.class))).willReturn(aliceAccount);
+			
+			TransactionDTO result = transactionService.blockTransaction(transactionId, blockReason, operatorId);
+			assertThat(result).isNotNull();
+			assertThat(result.status()).isEqualTo(TransactionStatus.BLOCKED);
+			assertThat(result.rejectionReason()).isEqualTo(blockReason);
+			
+			then(transactionRepository).should(times(1)).findById(transactionId);
+			then(accountRepository).should(times(1)).findByIdWithLock(accountId);
+	        then(accountRepository).should(times(1)).save(aliceAccount);
+	        then(transactionRepository).should(times(1)).updateStatus(eq(transactionId), eq(TransactionStatus.BLOCKED), any(LocalDateTime.class));
+	        then(auditLogRepository).should(times(1)).save(any(AuditLog.class));
 		}
 	}
 	private User buildUser(String email, String firstName, String lastName) {

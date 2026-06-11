@@ -225,7 +225,7 @@ public class AccountServiceImpl implements AccountService {
 	}
 	@Override
 	public Page<Summary> findAll(AccountStatus status, AccountType type, Pageable pageable) {
-		Specification<Account> spec = Specification.where((Specification<Account>)null);
+		Specification<Account> spec = Specification.allOf();
 		
         if (status != null) {
             spec = spec.and((root, query, cb) ->
