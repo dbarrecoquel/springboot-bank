@@ -293,6 +293,7 @@ public class AuthServiceImpl implements AuthService {
     /**
      * Version complète avec userId explicite — utilisée par le controller.
      */
+    @Override
     @Transactional
     public void verifyEmail(UUID userId, String token) {
         boolean valid = sessionCacheService.verifyOtp(userId, "EMAIL_VERIFY", token);
@@ -339,6 +340,7 @@ public class AuthServiceImpl implements AuthService {
     /**
      * Version complète avec userId — utilisée par le controller.
      */
+    @Override
     @Transactional
     public void resetPassword(UUID userId, String token, String newPassword) {
         validatePasswordPolicy(newPassword);

@@ -159,4 +159,14 @@ public interface AuthService {
      * @throws com.bank.common.exception.BankingException si le token est invalide
      */
     UUID extractUserId(String token);
+
+	/**
+	 * Version complète avec userId — utilisée par le controller.
+	 */
+	public void resetPassword(UUID userId, String token, String newPassword);
+
+	/**
+	 * Version complète avec userId explicite — utilisée par le controller.
+	 */
+	public void verifyEmail(UUID userId, String token);
 }
